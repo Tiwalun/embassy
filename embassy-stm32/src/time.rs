@@ -6,6 +6,7 @@ pub struct Bps(pub u32);
 
 /// Hertz
 #[derive(PartialEq, PartialOrd, Clone, Copy, Debug, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct Hertz(pub u32);
 
 /// KiloHertz

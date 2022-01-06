@@ -22,6 +22,7 @@ mod _version;
 pub use _version::*;
 
 #[derive(Clone, Copy)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct Clocks {
     pub sys: Hertz,
 
@@ -66,6 +67,23 @@ pub struct Clocks {
 
     #[cfg(rcc_f1)]
     pub adc: Hertz,
+    #[cfg(rcc_wb)]
+    pub pll_clk: Option<Hertz>,
+
+    #[cfg(rcc_wb)]
+    pub pllp: Option<Hertz>,
+
+    #[cfg(rcc_wb)]
+    pub pllq: Option<Hertz>,
+
+    #[cfg(rcc_wb)]
+    pub cpu_1: Hertz,
+
+    #[cfg(rcc_wb)]
+    pub cpu_2: Hertz,
+
+    #[cfg(rcc_wb)]
+    pub lse: Option<Hertz>,
 }
 
 /// Frozen clock frequencies

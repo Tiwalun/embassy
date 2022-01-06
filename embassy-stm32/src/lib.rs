@@ -54,6 +54,12 @@ pub mod usart;
 #[cfg(feature = "subghz")]
 pub mod subghz;
 
+#[cfg(ipcc)]
+pub mod ipcc;
+
+#[cfg(rtc)]
+pub mod rtc;
+
 // This must go last, so that it sees all the impl_foo! macros defined earlier.
 mod generated {
 
