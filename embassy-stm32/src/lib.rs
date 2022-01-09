@@ -60,6 +60,9 @@ pub mod ipcc;
 #[cfg(rtc)]
 pub mod rtc;
 
+#[cfg(pwr)]
+pub mod pwr;
+
 // This must go last, so that it sees all the impl_foo! macros defined earlier.
 mod generated {
 
