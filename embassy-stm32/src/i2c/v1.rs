@@ -1,12 +1,11 @@
-use crate::i2c::{Error, Instance, SclPin, SdaPin};
-use crate::time::Hertz;
 use core::marker::PhantomData;
 use embassy::util::Unborrow;
 use embassy_hal_common::unborrow;
 
+use crate::gpio::sealed::AFType;
+use crate::i2c::{Error, Instance, SclPin, SdaPin};
 use crate::pac::i2c;
-
-use crate::gpio::sealed::AFType::OutputOpenDrain;
+use crate::time::Hertz;
 
 pub struct I2c<'d, T: Instance> {
     phantom: PhantomData<&'d mut T>,
@@ -15,8 +14,8 @@ pub struct I2c<'d, T: Instance> {
 impl<'d, T: Instance> I2c<'d, T> {
     pub fn new<F>(
         _peri: impl Unborrow<Target = T> + 'd,
-        scl: impl Unborrow<Target = impl SclPin<T>>,
-        sda: impl Unborrow<Target = impl SdaPin<T>>,
+        scl: impl Unborrow<Target = impl SclPin<T>> + 'd,
+        sda: impl Unborrow<Target = impl SdaPin<T>> + 'd,
         freq: F,
     ) -> Self
     where
@@ -27,8 +26,8 @@ impl<'d, T: Instance> I2c<'d, T> {
         T::enable();
 
         unsafe {
-            scl.set_as_af(scl.af_num(), OutputOpenDrain);
-            sda.set_as_af(sda.af_num(), OutputOpenDrain);
+            scl.set_as_af(scl.af_num(), AFType::OutputOpenDrain);
+            sda.set_as_af(sda.af_num(), AFType::OutputOpenDrain);
         }
 
         unsafe {
@@ -108,11 +107,11 @@ impl<'d, T: Instance> I2c<'d, T> {
         // Send a START condition
 
         T::regs().cr1().modify(|reg| {
-            reg.set_start(i2c::vals::Start::START);
+            reg.set_start(true);
         });
 
         // Wait until START condition was generated
-        while self.check_and_clear_error_flags()?.sb() == i2c::vals::Sb::NOSTART {}
+        while !self.check_and_clear_error_flags()?.start() {}
 
         // Also wait until signalled we're master and everything is waiting for us
         while {
@@ -126,13 +125,9 @@ impl<'d, T: Instance> I2c<'d, T> {
         T::regs().dr().write(|reg| reg.set_dr(addr << 1));
 
         // Wait until address was sent
-        while {
-            // Check for any I2C errors. If a NACK occurs, the ADDR bit will never be set.
-            let sr1 = self.check_and_clear_error_flags()?;
-
-            // Wait for the address to be acknowledged
-            !sr1.addr()
-        } {}
+        // Wait for the address to be acknowledged
+        // Check for any I2C errors. If a NACK occurs, the ADDR bit will never be set.
+        while !self.check_and_clear_error_flags()?.addr() {}
 
         // Clear condition by reading SR2
         let _ = T::regs().sr2().read();
@@ -150,7 +145,7 @@ impl<'d, T: Instance> I2c<'d, T> {
         // Wait until we're ready for sending
         while {
             // Check for any I2C errors. If a NACK occurs, the ADDR bit will never be set.
-            !self.check_and_clear_error_flags()?.tx_e()
+            !self.check_and_clear_error_flags()?.txe()
         } {}
 
         // Push out a byte of data
@@ -170,7 +165,7 @@ impl<'d, T: Instance> I2c<'d, T> {
             // Check for any potential error conditions.
             self.check_and_clear_error_flags()?;
 
-            !T::regs().sr1().read().rx_ne()
+            !T::regs().sr1().read().rxne()
         } {}
 
         let value = T::regs().dr().read().dr();
@@ -182,13 +177,13 @@ impl<'d, T: Instance> I2c<'d, T> {
             // Send a START condition and set ACK bit
             unsafe {
                 T::regs().cr1().modify(|reg| {
-                    reg.set_start(i2c::vals::Start::START);
+                    reg.set_start(true);
                     reg.set_ack(true);
                 });
             }
 
             // Wait until START condition was generated
-            while unsafe { T::regs().sr1().read().sb() } == i2c::vals::Sb::NOSTART {}
+            while unsafe { !T::regs().sr1().read().start() } {}
 
             // Also wait until signalled we're master and everything is waiting for us
             while {
@@ -197,24 +192,14 @@ impl<'d, T: Instance> I2c<'d, T> {
             } {}
 
             // Set up current address, we're trying to talk to
-            unsafe {
-                T::regs().dr().write(|reg| reg.set_dr((addr << 1) + 1));
-            }
+            unsafe { T::regs().dr().write(|reg| reg.set_dr((addr << 1) + 1)) }
 
             // Wait until address was sent
-            while {
-                unsafe {
-                    let sr1 = self.check_and_clear_error_flags()?;
-
-                    // Wait for the address to be acknowledged
-                    !sr1.addr()
-                }
-            } {}
+            // Wait for the address to be acknowledged
+            while unsafe { !self.check_and_clear_error_flags()?.addr() } {}
 
             // Clear condition by reading SR2
-            unsafe {
-                let _ = T::regs().sr2().read();
-            }
+            let _ = unsafe { T::regs().sr2().read() };
 
             // Receive bytes into buffer
             for c in buffer {
@@ -225,15 +210,15 @@ impl<'d, T: Instance> I2c<'d, T> {
             unsafe {
                 T::regs().cr1().modify(|reg| {
                     reg.set_ack(false);
-                    reg.set_stop(i2c::vals::Stop::STOP);
-                });
+                    reg.set_stop(true);
+                })
             }
 
             // Receive last byte
             *last = unsafe { self.recv_byte()? };
 
             // Wait for the STOP to be sent.
-            while unsafe { T::regs().cr1().read().stop() == i2c::vals::Stop::STOP } {}
+            while unsafe { T::regs().cr1().read().stop() } {}
 
             // Fallthrough is success
             Ok(())
@@ -246,11 +231,9 @@ impl<'d, T: Instance> I2c<'d, T> {
         unsafe {
             self.write_bytes(addr, bytes)?;
             // Send a STOP condition
-            T::regs()
-                .cr1()
-                .modify(|reg| reg.set_stop(i2c::vals::Stop::STOP));
+            T::regs().cr1().modify(|reg| reg.set_stop(true));
             // Wait for STOP condition to transmit.
-            while T::regs().cr1().read().stop() == i2c::vals::Stop::STOP {}
+            while T::regs().cr1().read().stop() {}
         };
 
         // Fallthrough is success
@@ -270,7 +253,7 @@ impl<'d, T: Instance> I2c<'d, T> {
     }
 }
 
-impl<'d, T: Instance> embedded_hal::blocking::i2c::Read for I2c<'d, T> {
+impl<'d, T: Instance> embedded_hal_02::blocking::i2c::Read for I2c<'d, T> {
     type Error = Error;
 
     fn read(&mut self, addr: u8, buffer: &mut [u8]) -> Result<(), Self::Error> {
@@ -278,7 +261,7 @@ impl<'d, T: Instance> embedded_hal::blocking::i2c::Read for I2c<'d, T> {
     }
 }
 
-impl<'d, T: Instance> embedded_hal::blocking::i2c::Write for I2c<'d, T> {
+impl<'d, T: Instance> embedded_hal_02::blocking::i2c::Write for I2c<'d, T> {
     type Error = Error;
 
     fn write(&mut self, addr: u8, bytes: &[u8]) -> Result<(), Self::Error> {
@@ -286,7 +269,7 @@ impl<'d, T: Instance> embedded_hal::blocking::i2c::Write for I2c<'d, T> {
     }
 }
 
-impl<'d, T: Instance> embedded_hal::blocking::i2c::WriteRead for I2c<'d, T> {
+impl<'d, T: Instance> embedded_hal_02::blocking::i2c::WriteRead for I2c<'d, T> {
     type Error = Error;
 
     fn write_read(&mut self, addr: u8, bytes: &[u8], buffer: &mut [u8]) -> Result<(), Self::Error> {

@@ -1,18 +1,15 @@
 #![macro_use]
 
-use core::future::Future;
 use core::marker::PhantomData;
 use embassy::interrupt::Interrupt;
 use embassy::util::Unborrow;
 use embassy_hal_common::unborrow;
-use futures::TryFutureExt;
 
 use crate::dma::NoDma;
-use crate::gpio::sealed::AFType::{OutputOpenDrain, OutputPushPull};
-use crate::gpio::Pin;
+use crate::gpio::sealed::AFType;
 use crate::pac::usart::{regs, vals};
+use crate::peripherals;
 use crate::rcc::RccPeripheral;
-use crate::{dma, peripherals};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum DataBits {
@@ -83,11 +80,11 @@ pub struct Uart<'d, T: Instance, TxDma = NoDma, RxDma = NoDma> {
 
 impl<'d, T: Instance, TxDma, RxDma> Uart<'d, T, TxDma, RxDma> {
     pub fn new(
-        inner: impl Unborrow<Target = T>,
-        rx: impl Unborrow<Target = impl RxPin<T>>,
-        tx: impl Unborrow<Target = impl TxPin<T>>,
-        tx_dma: impl Unborrow<Target = TxDma>,
-        rx_dma: impl Unborrow<Target = RxDma>,
+        inner: impl Unborrow<Target = T> + 'd,
+        rx: impl Unborrow<Target = impl RxPin<T>> + 'd,
+        tx: impl Unborrow<Target = impl TxPin<T>> + 'd,
+        tx_dma: impl Unborrow<Target = TxDma> + 'd,
+        rx_dma: impl Unborrow<Target = RxDma> + 'd,
         config: Config,
     ) -> Self {
         unborrow!(inner, rx, tx, tx_dma, rx_dma);
@@ -101,8 +98,8 @@ impl<'d, T: Instance, TxDma, RxDma> Uart<'d, T, TxDma, RxDma> {
         let r = inner.regs();
 
         unsafe {
-            rx.set_as_af(rx.af_num(), OutputOpenDrain);
-            tx.set_as_af(tx.af_num(), OutputPushPull);
+            rx.set_as_af(rx.af_num(), AFType::Input);
+            tx.set_as_af(tx.af_num(), AFType::OutputPushPull);
 
             r.cr2().write(|_w| {});
             r.cr3().write(|_w| {});
@@ -211,72 +208,113 @@ impl<'d, T: Instance, TxDma, RxDma> Uart<'d, T, TxDma, RxDma> {
     }
 }
 
-impl<'d, T: Instance, TxDma, RxDma> embedded_hal::serial::Read<u8> for Uart<'d, T, TxDma, RxDma> {
-    type Error = Error;
-    fn read(&mut self) -> Result<u8, nb::Error<Self::Error>> {
-        let r = self.inner.regs();
-        unsafe {
-            let sr = sr(r).read();
-            if sr.pe() {
-                rdr(r).read_volatile();
-                Err(nb::Error::Other(Error::Parity))
-            } else if sr.fe() {
-                rdr(r).read_volatile();
-                Err(nb::Error::Other(Error::Framing))
-            } else if sr.ne() {
-                rdr(r).read_volatile();
-                Err(nb::Error::Other(Error::Noise))
-            } else if sr.ore() {
-                rdr(r).read_volatile();
-                Err(nb::Error::Other(Error::Overrun))
-            } else if sr.rxne() {
-                Ok(rdr(r).read_volatile())
-            } else {
-                Err(nb::Error::WouldBlock)
+mod eh02 {
+    use super::*;
+
+    impl<'d, T: Instance, TxDma, RxDma> embedded_hal_02::serial::Read<u8>
+        for Uart<'d, T, TxDma, RxDma>
+    {
+        type Error = Error;
+        fn read(&mut self) -> Result<u8, nb::Error<Self::Error>> {
+            let r = self.inner.regs();
+            unsafe {
+                let sr = sr(r).read();
+                if sr.pe() {
+                    rdr(r).read_volatile();
+                    Err(nb::Error::Other(Error::Parity))
+                } else if sr.fe() {
+                    rdr(r).read_volatile();
+                    Err(nb::Error::Other(Error::Framing))
+                } else if sr.ne() {
+                    rdr(r).read_volatile();
+                    Err(nb::Error::Other(Error::Noise))
+                } else if sr.ore() {
+                    rdr(r).read_volatile();
+                    Err(nb::Error::Other(Error::Overrun))
+                } else if sr.rxne() {
+                    Ok(rdr(r).read_volatile())
+                } else {
+                    Err(nb::Error::WouldBlock)
+                }
             }
+        }
+    }
+
+    impl<'d, T: Instance, TxDma, RxDma> embedded_hal_02::blocking::serial::Write<u8>
+        for Uart<'d, T, TxDma, RxDma>
+    {
+        type Error = Error;
+        fn bwrite_all(&mut self, buffer: &[u8]) -> Result<(), Self::Error> {
+            self.blocking_write(buffer)
+        }
+        fn bflush(&mut self) -> Result<(), Self::Error> {
+            self.blocking_flush()
         }
     }
 }
 
-impl<'d, T: Instance, TxDma, RxDma> embedded_hal::blocking::serial::Write<u8>
-    for Uart<'d, T, TxDma, RxDma>
-{
-    type Error = Error;
-    fn bwrite_all(&mut self, buffer: &[u8]) -> Result<(), Self::Error> {
-        self.blocking_write(buffer)
-    }
-    fn bflush(&mut self) -> Result<(), Self::Error> {
-        self.blocking_flush()
-    }
-}
+#[cfg(feature = "unstable-traits")]
+mod eh1 {
+    use super::*;
 
-impl<'d, T: Instance, TxDma, RxDma> embassy_traits::uart::Write for Uart<'d, T, TxDma, RxDma>
-where
-    TxDma: crate::usart::TxDma<T>,
-{
-    type WriteFuture<'a>
-    where
-        Self: 'a,
-    = impl Future<Output = Result<(), embassy_traits::uart::Error>> + 'a;
+    impl embedded_hal_1::serial::Error for Error {
+        fn kind(&self) -> embedded_hal_1::serial::ErrorKind {
+            match *self {
+                Self::Framing => embedded_hal_1::serial::ErrorKind::FrameFormat,
+                Self::Noise => embedded_hal_1::serial::ErrorKind::Noise,
+                Self::Overrun => embedded_hal_1::serial::ErrorKind::Overrun,
+                Self::Parity => embedded_hal_1::serial::ErrorKind::Parity,
+            }
+        }
+    }
 
-    fn write<'a>(&'a mut self, buf: &'a [u8]) -> Self::WriteFuture<'a> {
-        self.write(buf)
-            .map_err(|_| embassy_traits::uart::Error::Other)
+    impl<'d, T: Instance, TxDma, RxDma> embedded_hal_1::serial::ErrorType
+        for Uart<'d, T, TxDma, RxDma>
+    {
+        type Error = Error;
     }
 }
 
-impl<'d, T: Instance, TxDma, RxDma> embassy_traits::uart::Read for Uart<'d, T, TxDma, RxDma>
-where
-    RxDma: crate::usart::RxDma<T>,
-{
-    type ReadFuture<'a>
-    where
-        Self: 'a,
-    = impl Future<Output = Result<(), embassy_traits::uart::Error>> + 'a;
+#[cfg(all(feature = "unstable-traits", feature = "nightly"))]
+mod eh1a {
+    use super::*;
+    use core::future::Future;
 
-    fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Self::ReadFuture<'a> {
-        self.read(buf)
-            .map_err(|_| embassy_traits::uart::Error::Other)
+    impl<'d, T: Instance, TxDma, RxDma> embedded_hal_async::serial::Write for Uart<'d, T, TxDma, RxDma>
+    where
+        TxDma: crate::usart::TxDma<T>,
+    {
+        type WriteFuture<'a>
+        where
+            Self: 'a,
+        = impl Future<Output = Result<(), Self::Error>> + 'a;
+
+        fn write<'a>(&'a mut self, buf: &'a [u8]) -> Self::WriteFuture<'a> {
+            self.write(buf)
+        }
+
+        type FlushFuture<'a>
+        where
+            Self: 'a,
+        = impl Future<Output = Result<(), Self::Error>> + 'a;
+
+        fn flush<'a>(&'a mut self) -> Self::FlushFuture<'a> {
+            async move { Ok(()) }
+        }
+    }
+
+    impl<'d, T: Instance, TxDma, RxDma> embedded_hal_async::serial::Read for Uart<'d, T, TxDma, RxDma>
+    where
+        RxDma: crate::usart::RxDma<T>,
+    {
+        type ReadFuture<'a>
+        where
+            Self: 'a,
+        = impl Future<Output = Result<(), Self::Error>> + 'a;
+
+        fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> Self::ReadFuture<'a> {
+            self.read(buf)
+        }
     }
 }
 
@@ -567,46 +605,23 @@ unsafe fn clear_interrupt_flag(r: crate::pac::usart::Usart, flag: InterruptFlag)
 }
 
 pub(crate) mod sealed {
-    use super::*;
-
     pub trait Instance {
         fn regs(&self) -> crate::pac::usart::Usart;
-    }
-    pub trait RxPin<T: Instance>: Pin {
-        fn af_num(&self) -> u8;
-    }
-    pub trait TxPin<T: Instance>: Pin {
-        fn af_num(&self) -> u8;
-    }
-    pub trait CtsPin<T: Instance>: Pin {
-        fn af_num(&self) -> u8;
-    }
-    pub trait RtsPin<T: Instance>: Pin {
-        fn af_num(&self) -> u8;
-    }
-    pub trait CkPin<T: Instance>: Pin {
-        fn af_num(&self) -> u8;
-    }
-
-    pub trait RxDma<T: Instance> {
-        fn request(&self) -> dma::Request;
-    }
-
-    pub trait TxDma<T: Instance> {
-        fn request(&self) -> dma::Request;
     }
 }
 
 pub trait Instance: sealed::Instance + RccPeripheral {
     type Interrupt: Interrupt;
 }
-pub trait RxPin<T: Instance>: sealed::RxPin<T> {}
-pub trait TxPin<T: Instance>: sealed::TxPin<T> {}
-pub trait CtsPin<T: Instance>: sealed::CtsPin<T> {}
-pub trait RtsPin<T: Instance>: sealed::RtsPin<T> {}
-pub trait CkPin<T: Instance>: sealed::CkPin<T> {}
-pub trait RxDma<T: Instance>: sealed::RxDma<T> + dma::Channel {}
-pub trait TxDma<T: Instance>: sealed::TxDma<T> + dma::Channel {}
+
+pin_trait!(RxPin, Instance);
+pin_trait!(TxPin, Instance);
+pin_trait!(CtsPin, Instance);
+pin_trait!(RtsPin, Instance);
+pin_trait!(CkPin, Instance);
+
+dma_trait!(TxDma, Instance);
+dma_trait!(RxDma, Instance);
 
 crate::pac::interrupts!(
     ($inst:ident, usart, $block:ident, $signal_name:ident, $irq:ident) => {
@@ -619,137 +634,5 @@ crate::pac::interrupts!(
         impl Instance for peripherals::$inst {
             type Interrupt = crate::interrupt::$irq;
         }
-
     };
 );
-
-macro_rules! impl_pin {
-    ($inst:ident, $pin:ident, $signal:ident, $af:expr) => {
-        impl sealed::$signal<peripherals::$inst> for peripherals::$pin {
-            fn af_num(&self) -> u8 {
-                $af
-            }
-        }
-
-        impl $signal<peripherals::$inst> for peripherals::$pin {}
-    };
-}
-
-#[cfg(not(rcc_f1))]
-crate::pac::peripheral_pins!(
-
-    // USART
-    ($inst:ident, usart, USART, $pin:ident, TX, $af:expr) => {
-        impl_pin!($inst, $pin, TxPin, $af);
-    };
-    ($inst:ident, usart, USART, $pin:ident, RX, $af:expr) => {
-        impl_pin!($inst, $pin, RxPin, $af);
-    };
-    ($inst:ident, usart, USART, $pin:ident, CTS, $af:expr) => {
-        impl_pin!($inst, $pin, CtsPin, $af);
-    };
-    ($inst:ident, usart, USART, $pin:ident, RTS, $af:expr) => {
-        impl_pin!($inst, $pin, RtsPin, $af);
-    };
-    ($inst:ident, usart, USART, $pin:ident, CK, $af:expr) => {
-        impl_pin!($inst, $pin, CkPin, $af);
-    };
-
-    // UART
-    ($inst:ident, uart, UART, $pin:ident, TX, $af:expr) => {
-        impl_pin!($inst, $pin, TxPin, $af);
-    };
-    ($inst:ident, uart, UART, $pin:ident, RX, $af:expr) => {
-        impl_pin!($inst, $pin, RxPin, $af);
-    };
-    ($inst:ident, uart, UART, $pin:ident, CTS, $af:expr) => {
-        impl_pin!($inst, $pin, CtsPin, $af);
-    };
-    ($inst:ident, uart, UART, $pin:ident, RTS, $af:expr) => {
-        impl_pin!($inst, $pin, RtsPin, $af);
-    };
-    ($inst:ident, uart, UART, $pin:ident, CK, $af:expr) => {
-        impl_pin!($inst, $pin, CkPin, $af);
-    };
-);
-
-#[cfg(rcc_f1)]
-crate::pac::peripheral_pins!(
-
-    // USART
-    ($inst:ident, usart, USART, $pin:ident, TX) => {
-        impl_pin!($inst, $pin, TxPin, 0);
-    };
-    ($inst:ident, usart, USART, $pin:ident, RX) => {
-        impl_pin!($inst, $pin, RxPin, 0);
-    };
-    ($inst:ident, usart, USART, $pin:ident, CTS) => {
-        impl_pin!($inst, $pin, CtsPin, 0);
-    };
-    ($inst:ident, usart, USART, $pin:ident, RTS) => {
-        impl_pin!($inst, $pin, RtsPin, 0);
-    };
-    ($inst:ident, usart, USART, $pin:ident, CK) => {
-        impl_pin!($inst, $pin, CkPin, 0);
-    };
-
-    // UART
-    ($inst:ident, uart, UART, $pin:ident, TX) => {
-        impl_pin!($inst, $pin, TxPin, 0);
-    };
-    ($inst:ident, uart, UART, $pin:ident, RX) => {
-        impl_pin!($inst, $pin, RxPin, 0);
-    };
-    ($inst:ident, uart, UART, $pin:ident, CTS) => {
-        impl_pin!($inst, $pin, CtsPin, 0);
-    };
-    ($inst:ident, uart, UART, $pin:ident, RTS) => {
-        impl_pin!($inst, $pin, RtsPin, 0);
-    };
-    ($inst:ident, uart, UART, $pin:ident, CK) => {
-        impl_pin!($inst, $pin, CkPin, 0);
-    };
-);
-
-#[allow(unused)]
-macro_rules! impl_dma {
-    ($inst:ident, {dmamux: $dmamux:ident}, $signal:ident, $request:expr) => {
-        impl<T> sealed::$signal<peripherals::$inst> for T
-        where
-            T: crate::dma::MuxChannel<Mux = crate::dma::$dmamux>,
-        {
-            fn request(&self) -> dma::Request {
-                $request
-            }
-        }
-
-        impl<T> $signal<peripherals::$inst> for T where
-            T: crate::dma::MuxChannel<Mux = crate::dma::$dmamux>
-        {
-        }
-    };
-    ($inst:ident, {channel: $channel:ident}, $signal:ident, $request:expr) => {
-        impl sealed::$signal<peripherals::$inst> for peripherals::$channel {
-            fn request(&self) -> dma::Request {
-                $request
-            }
-        }
-
-        impl $signal<peripherals::$inst> for peripherals::$channel {}
-    };
-}
-
-crate::pac::peripheral_dma_channels! {
-    ($peri:ident, usart, $kind:ident, RX, $channel:tt, $request:expr) => {
-        impl_dma!($peri, $channel, RxDma, $request);
-    };
-    ($peri:ident, usart, $kind:ident, TX, $channel:tt, $request:expr) => {
-        impl_dma!($peri, $channel, TxDma, $request);
-    };
-    ($peri:ident, uart, $kind:ident, RX, $channel:tt, $request:expr) => {
-        impl_dma!($peri, $channel, RxDma, $request);
-    };
-    ($peri:ident, uart, $kind:ident, TX, $channel:tt, $request:expr) => {
-        impl_dma!($peri, $channel, TxDma, $request);
-    };
-}

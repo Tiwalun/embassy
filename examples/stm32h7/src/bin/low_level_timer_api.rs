@@ -10,10 +10,10 @@ use embassy::executor::Spawner;
 use embassy::time::{Duration, Timer};
 use embassy::util::Unborrow;
 use embassy_hal_common::unborrow;
-use embassy_stm32::gpio::NoPin;
-use embassy_stm32::pwm::{pins::*, Channel, OutputCompareMode};
+use embassy_stm32::gpio::low_level::AFType;
+use embassy_stm32::gpio::Speed;
+use embassy_stm32::pwm::*;
 use embassy_stm32::time::{Hertz, U32Ext};
-use embassy_stm32::timer::GeneralPurpose32bitInstance;
 use embassy_stm32::{Config, Peripherals};
 use example_common::*;
 
@@ -33,7 +33,7 @@ pub fn config() -> Config {
 async fn main(_spawner: Spawner, p: Peripherals) {
     info!("Hello World!");
 
-    let mut pwm = SimplePwm32::new(p.TIM5, p.PA0, NoPin, NoPin, NoPin, 10000.hz());
+    let mut pwm = SimplePwm32::new(p.TIM5, p.PA0, p.PA1, p.PA2, p.PA3, 10000.hz());
     let max = pwm.get_max_duty();
     pwm.enable(Channel::Ch1);
 
@@ -51,12 +51,12 @@ async fn main(_spawner: Spawner, p: Peripherals) {
         Timer::after(Duration::from_millis(300)).await;
     }
 }
-pub struct SimplePwm32<'d, T: GeneralPurpose32bitInstance> {
+pub struct SimplePwm32<'d, T: CaptureCompare32bitInstance> {
     phantom: PhantomData<&'d mut T>,
     inner: T,
 }
 
-impl<'d, T: GeneralPurpose32bitInstance> SimplePwm32<'d, T> {
+impl<'d, T: CaptureCompare32bitInstance> SimplePwm32<'d, T> {
     pub fn new<F: Into<Hertz>>(
         tim: impl Unborrow<Target = T> + 'd,
         ch1: impl Unborrow<Target = impl Channel1Pin<T>> + 'd,
@@ -71,10 +71,14 @@ impl<'d, T: GeneralPurpose32bitInstance> SimplePwm32<'d, T> {
         <T as embassy_stm32::rcc::low_level::RccPeripheral>::reset();
 
         unsafe {
-            ch1.configure();
-            ch2.configure();
-            ch3.configure();
-            ch4.configure();
+            ch1.set_speed(Speed::VeryHigh);
+            ch1.set_as_af(ch1.af_num(), AFType::OutputPushPull);
+            ch2.set_speed(Speed::VeryHigh);
+            ch2.set_as_af(ch1.af_num(), AFType::OutputPushPull);
+            ch3.set_speed(Speed::VeryHigh);
+            ch3.set_as_af(ch1.af_num(), AFType::OutputPushPull);
+            ch4.set_speed(Speed::VeryHigh);
+            ch4.set_as_af(ch1.af_num(), AFType::OutputPushPull);
         }
 
         let mut this = Self {

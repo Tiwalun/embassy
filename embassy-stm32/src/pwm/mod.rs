@@ -1,11 +1,3 @@
-#[cfg(feature = "unstable-pac")]
-#[macro_use]
-pub mod pins;
-
-#[cfg(not(feature = "unstable-pac"))]
-#[macro_use]
-pub(crate) mod pins;
-
 pub mod simple_pwm;
 
 #[cfg(feature = "unstable-pac")]
@@ -62,7 +54,7 @@ impl From<OutputCompareMode> for stm32_metapac::timer::vals::Ocm {
 pub(crate) mod sealed {
     use super::*;
 
-    pub trait CaptureCompareCapable16bitInstance: crate::timer::sealed::Basic16bitInstance {
+    pub trait CaptureCompare16bitInstance: crate::timer::sealed::Basic16bitInstance {
         unsafe fn set_output_compare_mode(&mut self, channel: Channel, mode: OutputCompareMode);
 
         unsafe fn enable_channel(&mut self, channel: Channel, enable: bool);
@@ -72,7 +64,7 @@ pub(crate) mod sealed {
         unsafe fn get_max_compare_value(&self) -> u16;
     }
 
-    pub trait CaptureCompareCapable32bitInstance:
+    pub trait CaptureCompare32bitInstance:
         crate::timer::sealed::GeneralPurpose32bitInstance
     {
         unsafe fn set_output_compare_mode(&mut self, channel: Channel, mode: OutputCompareMode);
@@ -85,19 +77,22 @@ pub(crate) mod sealed {
     }
 }
 
-pub trait CaptureCompareCapable16bitInstance:
-    sealed::CaptureCompareCapable16bitInstance + crate::timer::Basic16bitInstance + 'static
+pub trait CaptureCompare16bitInstance:
+    sealed::CaptureCompare16bitInstance + crate::timer::Basic16bitInstance + 'static
 {
 }
-pub trait CaptureCompareCapable32bitInstance:
-    sealed::CaptureCompareCapable32bitInstance + crate::timer::GeneralPurpose32bitInstance + 'static
+pub trait CaptureCompare32bitInstance:
+    sealed::CaptureCompare32bitInstance
+    + CaptureCompare16bitInstance
+    + crate::timer::GeneralPurpose32bitInstance
+    + 'static
 {
 }
 
 #[allow(unused)]
 macro_rules! impl_compare_capable_16bit {
     ($inst:ident) => {
-        impl crate::pwm::sealed::CaptureCompareCapable16bitInstance for crate::peripherals::$inst {
+        impl crate::pwm::sealed::CaptureCompare16bitInstance for crate::peripherals::$inst {
             unsafe fn set_output_compare_mode(
                 &mut self,
                 channel: crate::pwm::Channel,
@@ -134,7 +129,7 @@ macro_rules! impl_compare_capable_16bit {
 
 crate::pac::interrupts! {
     ($inst:ident, timer, TIM_GP16, UP, $irq:ident) => {
-        impl crate::pwm::sealed::CaptureCompareCapable16bitInstance for crate::peripherals::$inst {
+        impl crate::pwm::sealed::CaptureCompare16bitInstance for crate::peripherals::$inst {
             unsafe fn set_output_compare_mode(
                 &mut self,
                 channel: crate::pwm::Channel,
@@ -167,14 +162,14 @@ crate::pac::interrupts! {
             }
         }
 
-        impl CaptureCompareCapable16bitInstance for crate::peripherals::$inst {
+        impl CaptureCompare16bitInstance for crate::peripherals::$inst {
 
         }
     };
 
     ($inst:ident, timer, TIM_GP32, UP, $irq:ident) => {
         impl_compare_capable_16bit!($inst);
-        impl crate::pwm::sealed::CaptureCompareCapable32bitInstance for crate::peripherals::$inst {
+        impl crate::pwm::sealed::CaptureCompare32bitInstance for crate::peripherals::$inst {
             unsafe fn set_output_compare_mode(
                 &mut self,
                 channel: crate::pwm::Channel,
@@ -200,16 +195,16 @@ crate::pac::interrupts! {
                 self.regs_gp32().arr().read().arr() as u32
             }
         }
-        impl CaptureCompareCapable16bitInstance for crate::peripherals::$inst {
+        impl CaptureCompare16bitInstance for crate::peripherals::$inst {
 
         }
-        impl CaptureCompareCapable32bitInstance for crate::peripherals::$inst {
+        impl CaptureCompare32bitInstance for crate::peripherals::$inst {
 
         }
     };
 
     ($inst:ident, timer, TIM_ADV, UP, $irq:ident) => {
-        impl crate::pwm::sealed::CaptureCompareCapable16bitInstance for crate::peripherals::$inst {
+        impl crate::pwm::sealed::CaptureCompare16bitInstance for crate::peripherals::$inst {
             unsafe fn set_output_compare_mode(
                 &mut self,
                 channel: crate::pwm::Channel,
@@ -242,81 +237,24 @@ crate::pac::interrupts! {
             }
         }
 
-        impl CaptureCompareCapable16bitInstance for crate::peripherals::$inst {
+        impl CaptureCompare16bitInstance for crate::peripherals::$inst {
 
         }
     };
 }
 
-#[allow(unused)]
-macro_rules! impl_pwm_nopin {
-    ($inst:ident) => {
-        impl_no_pin!($inst, Channel1Pin);
-        impl_no_pin!($inst, Channel1ComplementaryPin);
-        impl_no_pin!($inst, Channel2Pin);
-        impl_no_pin!($inst, Channel2ComplementaryPin);
-        impl_no_pin!($inst, Channel3Pin);
-        impl_no_pin!($inst, Channel3ComplementaryPin);
-        impl_no_pin!($inst, Channel4Pin);
-        impl_no_pin!($inst, Channel4ComplementaryPin);
-        impl_no_pin!($inst, ExternalTriggerPin);
-        impl_no_pin!($inst, BreakInputPin);
-        impl_no_pin!($inst, BreakInputComparator1Pin);
-        impl_no_pin!($inst, BreakInputComparator2Pin);
-        impl_no_pin!($inst, BreakInput2Pin);
-        impl_no_pin!($inst, BreakInput2Comparator1Pin);
-        impl_no_pin!($inst, BreakInput2Comparator2Pin);
-    };
-}
-
-crate::pac::peripherals!(
-    (timer, $inst:ident) => { impl_pwm_nopin!($inst); };
-);
-
-crate::pac::peripheral_pins!(
-    ($inst:ident, timer, $block:ident, $pin:ident, CH1, $af:expr) => {
-        impl_pin!($inst, Channel1Pin, $pin, $af);
-    };
-    ($inst:ident, timer, $block:ident, $pin:ident, CH1N, $af:expr) => {
-        impl_pin!($inst, Channel1ComplementaryPin, $pin, $af);
-    };
-    ($inst:ident, timer, $block:ident, $pin:ident, CH2, $af:expr) => {
-        impl_pin!($inst, Channel2Pin, $pin, $af);
-    };
-    ($inst:ident, timer, $block:ident, $pin:ident, CH2N, $af:expr) => {
-        impl_pin!($inst, Channel2ComplementaryPin, $pin, $af);
-    };
-    ($inst:ident, timer, $block:ident, $pin:ident, CH3, $af:expr) => {
-        impl_pin!($inst, Channel3Pin, $pin, $af);
-    };
-    ($inst:ident, timer, $block:ident, $pin:ident, CH3N, $af:expr) => {
-        impl_pin!($inst, Channel3ComplementaryPin, $pin, $af);
-    };
-    ($inst:ident, timer, $block:ident, $pin:ident, CH4, $af:expr) => {
-        impl_pin!($inst, Channel4Pin, $pin, $af);
-    };
-    ($inst:ident, timer, $block:ident, $pin:ident, CH4N, $af:expr) => {
-        impl_pin!($inst, Channel4ComplementaryPin, $pin, $af);
-    };
-    ($inst:ident, timer, $block:ident, $pin:ident, ETR, $af:expr) => {
-        impl_pin!($inst, ExternalTriggerPin, $pin, $af);
-    };
-    ($inst:ident, timer, $block:ident, $pin:ident, BKIN, $af:expr) => {
-        impl_pin!($inst, BreakInputPin, $pin, $af);
-    };
-    ($inst:ident, timer, $block:ident, $pin:ident, BKIN_COMP1, $af:expr) => {
-        impl_pin!($inst, BreakInputComparator1Pin, $pin, $af);
-    };
-    ($inst:ident, timer, $block:ident, $pin:ident, BKIN_COMP2, $af:expr) => {
-        impl_pin!($inst, BreakInputComparator2Pin, $pin, $af);
-    };
-    ($inst:ident, timer, $block:ident, $pin:ident, BKIN2, $af:expr) => {
-        impl_pin!($inst, BreakInput2Pin, $pin, $af);
-    };
-    ($inst:ident, timer, $block:ident, $pin:ident, BKIN2_COMP1, $af:expr) => {
-        impl_pin!($inst, BreakInput2Comparator1Pin, $pin, $af);
-    };
-    ($inst:ident, timer, $block:ident, $pin:ident, BKIN2_COMP2, $af:expr) => {
-        impl_pin!($inst, BreakInput2Comparator2Pin, $pin, $af);
-    };
-);
+pin_trait!(Channel1Pin, CaptureCompare16bitInstance);
+pin_trait!(Channel1ComplementaryPin, CaptureCompare16bitInstance);
+pin_trait!(Channel2Pin, CaptureCompare16bitInstance);
+pin_trait!(Channel2ComplementaryPin, CaptureCompare16bitInstance);
+pin_trait!(Channel3Pin, CaptureCompare16bitInstance);
+pin_trait!(Channel3ComplementaryPin, CaptureCompare16bitInstance);
+pin_trait!(Channel4Pin, CaptureCompare16bitInstance);
+pin_trait!(Channel4ComplementaryPin, CaptureCompare16bitInstance);
+pin_trait!(ExternalTriggerPin, CaptureCompare16bitInstance);
+pin_trait!(BreakInputPin, CaptureCompare16bitInstance);
+pin_trait!(BreakInputComparator1Pin, CaptureCompare16bitInstance);
+pin_trait!(BreakInputComparator2Pin, CaptureCompare16bitInstance);
+pin_trait!(BreakInput2Pin, CaptureCompare16bitInstance);
+pin_trait!(BreakInput2Comparator1Pin, CaptureCompare16bitInstance);
+pin_trait!(BreakInput2Comparator2Pin, CaptureCompare16bitInstance);

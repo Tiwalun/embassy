@@ -1,6 +1,8 @@
 #![no_std]
-#![feature(generic_associated_types)]
-#![feature(type_alias_impl_trait)]
+#![cfg_attr(
+    feature = "nightly",
+    feature(generic_associated_types, type_alias_impl_trait)
+)]
 
 #[cfg(feature = "unstable-pac")]
 pub use stm32_metapac as pac;
@@ -13,6 +15,7 @@ pub mod fmt;
 // Utilities
 pub mod interrupt;
 pub mod time;
+mod traits;
 
 // Always-present hardware
 pub mod dma;
@@ -36,6 +39,8 @@ pub mod dcmi;
 pub mod eth;
 #[cfg(feature = "exti")]
 pub mod exti;
+#[cfg(fmc)]
+pub mod fmc;
 #[cfg(i2c)]
 pub mod i2c;
 
@@ -50,6 +55,8 @@ pub mod sdmmc;
 pub mod spi;
 #[cfg(usart)]
 pub mod usart;
+#[cfg(feature = "usb-otg")]
+pub mod usb_otg;
 
 #[cfg(feature = "subghz")]
 pub mod subghz;
@@ -70,8 +77,6 @@ mod generated {
     #![allow(unused_imports)]
     #![allow(non_snake_case)]
 
-    use crate::interrupt;
-
     include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 }
 pub use embassy_macros::interrupt;
@@ -80,6 +85,7 @@ pub use generated::{peripherals, Peripherals};
 #[non_exhaustive]
 pub struct Config {
     pub rcc: rcc::Config,
+    #[cfg(dbgmcu)]
     pub enable_debug_during_sleep: bool,
 }
 
@@ -87,6 +93,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             rcc: Default::default(),
+            #[cfg(dbgmcu)]
             enable_debug_during_sleep: true,
         }
     }
@@ -97,6 +104,7 @@ pub fn init(config: Config) -> Peripherals {
     let p = Peripherals::take();
 
     unsafe {
+        #[cfg(dbgmcu)]
         if config.enable_debug_during_sleep {
             crate::pac::DBGMCU.cr().modify(|cr| {
                 crate::pac::dbgmcu! {

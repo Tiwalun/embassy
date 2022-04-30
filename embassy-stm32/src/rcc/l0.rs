@@ -1,5 +1,7 @@
 use crate::pac::rcc::vals::{Hpre, Msirange, Plldiv, Pllmul, Pllsrc, Ppre, Sw};
-use crate::pac::{CRS, RCC, SYSCFG};
+use crate::pac::RCC;
+#[cfg(crs)]
+use crate::pac::{CRS, SYSCFG};
 use crate::rcc::{set_freqs, Clocks};
 use crate::time::Hertz;
 use crate::time::U32Ext;
@@ -180,6 +182,7 @@ pub struct Config {
     pub ahb_pre: AHBPrescaler,
     pub apb1_pre: APBPrescaler,
     pub apb2_pre: APBPrescaler,
+    #[cfg(crs)]
     pub enable_hsi48: bool,
 }
 
@@ -191,6 +194,7 @@ impl Default for Config {
             ahb_pre: AHBPrescaler::NotDivided,
             apb1_pre: APBPrescaler::NotDivided,
             apb2_pre: APBPrescaler::NotDivided,
+            #[cfg(crs)]
             enable_hsi48: false,
         }
     }
@@ -312,6 +316,7 @@ pub(crate) unsafe fn init(config: Config) {
         }
     };
 
+    #[cfg(crs)]
     if config.enable_hsi48 {
         // Reset SYSCFG peripheral
         RCC.apb2rstr().modify(|w| w.set_syscfgrst(true));
@@ -353,7 +358,7 @@ pub(crate) unsafe fn init(config: Config) {
 
     set_freqs(Clocks {
         sys: sys_clk.hz(),
-        ahb: ahb_freq.hz(),
+        ahb1: ahb_freq.hz(),
         apb1: apb1_freq.hz(),
         apb2: apb2_freq.hz(),
         apb1_tim: apb1_tim_freq.hz(),

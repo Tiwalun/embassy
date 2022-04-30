@@ -7,10 +7,8 @@ use embassy::interrupt::{Interrupt, InterruptExt};
 use embassy::waitqueue::AtomicWaker;
 
 use crate::dma::Request;
-use crate::interrupt;
 use crate::pac;
 use crate::pac::bdma::vals;
-use crate::rcc::sealed::RccPeripheral;
 
 use super::{Word, WordSize};
 
@@ -51,9 +49,15 @@ macro_rules! dma_num {
     (BDMA) => {
         0
     };
+    (BDMA1) => {
+        0
+    };
+    (BDMA2) => {
+        1
+    };
 }
 
-unsafe fn on_irq() {
+pub(crate) unsafe fn on_irq() {
     pac::peripherals! {
         (bdma, $dma:ident) => {
                 let isr = pac::$dma.isr().read();
@@ -78,14 +82,13 @@ pub(crate) unsafe fn init() {
             crate::interrupt::$irq::steal().enable();
         };
     }
-    pac::peripherals! {
-        (bdma, $peri:ident) => {
-            crate::peripherals::$peri::enable();
-        };
-    }
+    crate::generated::init_bdma();
 }
 
 pac::dma_channels! {
+    ($channel_peri:ident, BDMA1, bdma, $channel_num:expr, $dmamux:tt) => {
+        // BDMA1 in H7 doesn't use DMAMUX, which breaks
+    };
     ($channel_peri:ident, $dma_peri:ident, bdma, $channel_num:expr, $dmamux:tt) => {
         impl crate::dma::sealed::Channel for crate::peripherals::$channel_peri {
 
@@ -167,15 +170,6 @@ pac::dma_channels! {
         }
 
         impl crate::dma::Channel for crate::peripherals::$channel_peri {}
-    };
-}
-
-pac::interrupts! {
-    ($peri:ident, bdma, $block:ident, $signal_name:ident, $irq:ident) => {
-        #[crate::interrupt]
-        unsafe fn $irq () {
-            on_irq()
-        }
     };
 }
 

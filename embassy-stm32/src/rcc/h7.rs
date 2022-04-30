@@ -4,10 +4,10 @@ use embassy::util::Unborrow;
 use embassy_hal_common::unborrow;
 use stm32_metapac::rcc::vals::{Mco1, Mco2};
 
-use crate::gpio::sealed::Pin as __GpioPin;
-use crate::gpio::Pin;
+use crate::gpio::sealed::AFType;
+use crate::gpio::Speed;
 use crate::pac::rcc::vals::Timpre;
-use crate::pac::rcc::vals::{Ckpersel, Dppre, Hpre, Hsebyp, Hsidiv, Pllsrc, Sw};
+use crate::pac::rcc::vals::{Ckpersel, Dppre, Hpre, Hsidiv, Pllsrc, Sw};
 use crate::pac::{PWR, RCC, SYSCFG};
 use crate::peripherals;
 use crate::rcc::{set_freqs, Clocks};
@@ -77,7 +77,6 @@ pub struct Config {
     pub bypass_hse: bool,
     pub sys_ck: Option<Hertz>,
     pub per_ck: Option<Hertz>,
-    rcc_hclk: Option<Hertz>,
     pub hclk: Option<Hertz>,
     pub pclk1: Option<Hertz>,
     pub pclk2: Option<Hertz>,
@@ -319,21 +318,15 @@ impl McoSource for Mco2Source {
 }
 
 pub(crate) mod sealed {
-    use super::*;
-
     pub trait McoInstance {
         type Source;
         unsafe fn apply_clock_settings(source: Self::Source, prescaler: u8);
-    }
-
-    pub trait McoPin<T: McoInstance>: Pin {
-        fn configure(&mut self);
     }
 }
 
 pub trait McoInstance: sealed::McoInstance + 'static {}
 
-pub trait McoPin<T: McoInstance>: sealed::McoPin<T> + 'static {}
+pin_trait!(McoPin, McoInstance);
 
 macro_rules! impl_peri {
     ($peri:ident, $source:ident, $set_source:ident, $set_prescaler:ident) => {
@@ -355,35 +348,6 @@ macro_rules! impl_peri {
 impl_peri!(MCO1, Mco1, set_mco1, set_mco1pre);
 impl_peri!(MCO2, Mco2, set_mco2, set_mco2pre);
 
-macro_rules! impl_pin {
-    ($peri:ident, $pin:ident, $af:expr) => {
-        impl McoPin<peripherals::$peri> for peripherals::$pin {}
-
-        impl sealed::McoPin<peripherals::$peri> for peripherals::$pin {
-            fn configure(&mut self) {
-                critical_section::with(|_| unsafe {
-                    self.set_as_af($af, crate::gpio::sealed::AFType::OutputPushPull);
-                    self.block().ospeedr().modify(|w| {
-                        w.set_ospeedr(
-                            self.pin() as usize,
-                            crate::pac::gpio::vals::Ospeedr::VERYHIGHSPEED,
-                        )
-                    });
-                })
-            }
-        }
-    };
-}
-
-crate::pac::peripheral_pins!(
-    ($inst:ident, rcc, RCC, $pin:ident, MCO_1, $af:expr) => {
-        impl_pin!(MCO1, $pin, $af);
-    };
-    ($inst:ident, rcc, RCC, $pin:ident, MCO_2, $af:expr) => {
-        impl_pin!(MCO2, $pin, $af);
-    };
-);
-
 pub struct Mco<'d, T: McoInstance> {
     phantom: PhantomData<&'d mut T>,
 }
@@ -397,11 +361,11 @@ impl<'d, T: McoInstance> Mco<'d, T> {
     ) -> Self {
         unborrow!(pin);
 
-        unsafe {
+        critical_section::with(|_| unsafe {
             T::apply_clock_settings(source.into_raw(), prescaler.into_raw());
-        }
-
-        pin.configure();
+            pin.set_as_af(pin.af_num(), AFType::OutputPushPull);
+            pin.set_speed(Speed::VeryHigh);
+        });
 
         Self {
             phantom: PhantomData,
@@ -526,7 +490,7 @@ pub(crate) unsafe fn init(mut config: Config) {
     };
     assert!(sys_d1cpre_ck <= sys_d1cpre_ck_max);
 
-    let rcc_hclk = config.rcc_hclk.map(|v| v.0).unwrap_or(sys_d1cpre_ck / 2);
+    let rcc_hclk = config.hclk.map(|v| v.0).unwrap_or(sys_d1cpre_ck / 2);
     assert!(rcc_hclk <= rcc_hclk_max);
 
     // Estimate divisor
@@ -596,11 +560,7 @@ pub(crate) unsafe fn init(mut config: Config) {
             // Ensure HSE is on and stable
             RCC.cr().modify(|w| {
                 w.set_hseon(true);
-                w.set_hsebyp(if config.bypass_hse {
-                    Hsebyp::BYPASSED
-                } else {
-                    Hsebyp::NOTBYPASSED
-                });
+                w.set_hsebyp(config.bypass_hse);
             });
             while !RCC.cr().read().hserdy() {}
             Some(hse)

@@ -1,5 +1,5 @@
 use crate::pac::flash::vals::Latency;
-use crate::pac::rcc::vals::{Hpre, Hsebyp, Pllmul, Pllsrc, Ppre, Prediv, Sw, Usbpre};
+use crate::pac::rcc::vals::{Hpre, Pllmul, Pllsrc, Ppre, Prediv, Sw, Usbpre};
 use crate::pac::{FLASH, RCC};
 use crate::rcc::{set_freqs, Clocks};
 use crate::time::Hertz;
@@ -106,11 +106,7 @@ pub(crate) unsafe fn init(config: Config) {
     // Enable HSE
     if config.hse.is_some() {
         RCC.cr().write(|w| {
-            w.set_hsebyp(if config.bypass_hse {
-                Hsebyp::BYPASSED
-            } else {
-                Hsebyp::NOTBYPASSED
-            });
+            w.set_hsebyp(config.bypass_hse);
             // We turn on clock security to switch to HSI when HSE fails
             w.set_csson(true);
             w.set_hseon(true);
@@ -164,7 +160,7 @@ pub(crate) unsafe fn init(config: Config) {
         apb2: Hertz(pclk2),
         apb1_tim: Hertz(pclk1 * timer_mul1),
         apb2_tim: Hertz(pclk2 * timer_mul2),
-        ahb: Hertz(hclk),
+        ahb1: Hertz(hclk),
     });
 }
 
@@ -217,12 +213,12 @@ fn calc_pll(config: &Config, Hertz(sysclk): Hertz) -> (Hertz, PllConfig) {
             cfg_if::cfg_if! {
                 // For some chips PREDIV is always two, and cannot be changed
                 if #[cfg(any(
-                        feature="stm32f302xd", feature="stm32f302xe", feature="stm32f303xd",
-                        feature="stm32f303xe", feature="stm32f398xe"
+                        stm32f302xd, stm32f302xe, stm32f303xd,
+                        stm32f303xe, stm32f398xe
                     ))] {
                     let (multiplier, divisor) = get_mul_div(sysclk, HSI);
                     (
-                        Hertz((hse / divisor) * multiplier),
+                        Hertz((HSI / divisor) * multiplier),
                         Pllsrc::HSI_DIV_PREDIV,
                         into_pll_mul(multiplier),
                         Some(into_pre_div(divisor)),
