@@ -13,30 +13,22 @@ use futures::future::poll_fn;
 use crate::dma::NoDma;
 use crate::gpio::sealed::AFType;
 use crate::i2c::{Error, Instance, SclPin, SdaPin};
-use crate::pac;
 use crate::pac::i2c;
 use crate::time::Hertz;
 
-const I2C_COUNT: usize = pac::peripheral_count!(i2c);
-
 pub struct State {
-    waker: [AtomicWaker; I2C_COUNT],
-    chunks_transferred: [AtomicUsize; I2C_COUNT],
+    waker: AtomicWaker,
+    chunks_transferred: AtomicUsize,
 }
 
 impl State {
-    const fn new() -> Self {
-        const AW: AtomicWaker = AtomicWaker::new();
-        const CT: AtomicUsize = AtomicUsize::new(0);
-
+    pub(crate) const fn new() -> Self {
         Self {
-            waker: [AW; I2C_COUNT],
-            chunks_transferred: [CT; I2C_COUNT],
+            waker: AtomicWaker::new(),
+            chunks_transferred: AtomicUsize::new(0),
         }
     }
 }
-
-static STATE: State = State::new();
 
 pub struct I2c<'d, T: Instance, TXDMA = NoDma, RXDMA = NoDma> {
     phantom: PhantomData<&'d mut T>,
@@ -61,6 +53,7 @@ impl<'d, T: Instance, TXDMA, RXDMA> I2c<'d, T, TXDMA, RXDMA> {
         unborrow!(irq, scl, sda, tx_dma, rx_dma);
 
         T::enable();
+        T::reset();
 
         unsafe {
             scl.set_as_af(scl.af_num(), AFType::OutputOpenDrain);
@@ -108,9 +101,9 @@ impl<'d, T: Instance, TXDMA, RXDMA> I2c<'d, T, TXDMA, RXDMA> {
         let isr = regs.isr().read();
 
         if isr.tcr() || isr.tc() {
-            let n = T::state_number();
-            STATE.chunks_transferred[n].fetch_add(1, Ordering::Relaxed);
-            STATE.waker[n].wake();
+            let state = T::state();
+            state.chunks_transferred.fetch_add(1, Ordering::Relaxed);
+            state.waker.wake();
         }
         // The flag can only be cleared by writting to nbytes, we won't do that here, so disable
         // the interrupt
@@ -411,8 +404,8 @@ impl<'d, T: Instance, TXDMA, RXDMA> I2c<'d, T, TXDMA, RXDMA> {
             crate::dma::write(ch, request, bytes, dst)
         };
 
-        let state_number = T::state_number();
-        STATE.chunks_transferred[state_number].store(0, Ordering::Relaxed);
+        let state = T::state();
+        state.chunks_transferred.store(0, Ordering::Relaxed);
         let mut remaining_len = total_len;
 
         let _on_drop = OnDrop::new(|| {
@@ -445,8 +438,8 @@ impl<'d, T: Instance, TXDMA, RXDMA> I2c<'d, T, TXDMA, RXDMA> {
         }
 
         poll_fn(|cx| {
-            STATE.waker[state_number].register(cx.waker());
-            let chunks_transferred = STATE.chunks_transferred[state_number].load(Ordering::Relaxed);
+            state.waker.register(cx.waker());
+            let chunks_transferred = state.chunks_transferred.load(Ordering::Relaxed);
 
             if chunks_transferred == total_chunks {
                 return Poll::Ready(());
@@ -504,8 +497,8 @@ impl<'d, T: Instance, TXDMA, RXDMA> I2c<'d, T, TXDMA, RXDMA> {
             crate::dma::read(ch, request, src, buffer)
         };
 
-        let state_number = T::state_number();
-        STATE.chunks_transferred[state_number].store(0, Ordering::Relaxed);
+        let state = T::state();
+        state.chunks_transferred.store(0, Ordering::Relaxed);
         let mut remaining_len = total_len;
 
         let _on_drop = OnDrop::new(|| {
@@ -530,8 +523,8 @@ impl<'d, T: Instance, TXDMA, RXDMA> I2c<'d, T, TXDMA, RXDMA> {
         }
 
         poll_fn(|cx| {
-            STATE.waker[state_number].register(cx.waker());
-            let chunks_transferred = STATE.chunks_transferred[state_number].load(Ordering::Relaxed);
+            state.waker.register(cx.waker());
+            let chunks_transferred = state.chunks_transferred.load(Ordering::Relaxed);
 
             if chunks_transferred == total_chunks {
                 return Poll::Ready(());
@@ -925,58 +918,46 @@ mod eh1 {
     }
 }
 
-#[cfg(all(feature = "unstable-traits", feature = "nightly"))]
-mod eh1a {
-    use super::super::{RxDma, TxDma};
-    use super::*;
-    use core::future::Future;
+cfg_if::cfg_if! {
+    if #[cfg(all(feature = "unstable-traits", feature = "nightly"))] {
+        use super::{RxDma, TxDma};
+        use core::future::Future;
 
-    impl<'d, T: Instance, TXDMA: TxDma<T>, RXDMA: RxDma<T>> embedded_hal_async::i2c::I2c
-        for I2c<'d, T, TXDMA, RXDMA>
-    {
-        type ReadFuture<'a>
-        where
-            Self: 'a,
-        = impl Future<Output = Result<(), Self::Error>> + 'a;
+        impl<'d, T: Instance, TXDMA: TxDma<T>, RXDMA: RxDma<T>> embedded_hal_async::i2c::I2c
+            for I2c<'d, T, TXDMA, RXDMA>
+        {
+            type ReadFuture<'a> = impl Future<Output = Result<(), Self::Error>> + 'a where Self: 'a;
 
-        fn read<'a>(&'a mut self, address: u8, buffer: &'a mut [u8]) -> Self::ReadFuture<'a> {
-            self.read(address, buffer)
-        }
+            fn read<'a>(&'a mut self, address: u8, buffer: &'a mut [u8]) -> Self::ReadFuture<'a> {
+                self.read(address, buffer)
+            }
 
-        type WriteFuture<'a>
-        where
-            Self: 'a,
-        = impl Future<Output = Result<(), Self::Error>> + 'a;
-        fn write<'a>(&'a mut self, address: u8, bytes: &'a [u8]) -> Self::WriteFuture<'a> {
-            self.write(address, bytes)
-        }
+            type WriteFuture<'a> = impl Future<Output = Result<(), Self::Error>> + 'a where Self: 'a;
+            fn write<'a>(&'a mut self, address: u8, bytes: &'a [u8]) -> Self::WriteFuture<'a> {
+                self.write(address, bytes)
+            }
 
-        type WriteReadFuture<'a>
-        where
-            Self: 'a,
-        = impl Future<Output = Result<(), Self::Error>> + 'a;
-        fn write_read<'a>(
-            &'a mut self,
-            address: u8,
-            bytes: &'a [u8],
-            buffer: &'a mut [u8],
-        ) -> Self::WriteReadFuture<'a> {
-            self.write_read(address, bytes, buffer)
-        }
+            type WriteReadFuture<'a> = impl Future<Output = Result<(), Self::Error>> + 'a where Self: 'a;
+            fn write_read<'a>(
+                &'a mut self,
+                address: u8,
+                bytes: &'a [u8],
+                buffer: &'a mut [u8],
+            ) -> Self::WriteReadFuture<'a> {
+                self.write_read(address, bytes, buffer)
+            }
 
-        type TransactionFuture<'a>
-        where
-            Self: 'a,
-        = impl Future<Output = Result<(), Self::Error>> + 'a;
+            type TransactionFuture<'a, 'b> = impl Future<Output = Result<(), Self::Error>> + 'a where Self: 'a, 'b: 'a;
 
-        fn transaction<'a>(
-            &'a mut self,
-            address: u8,
-            operations: &mut [embedded_hal_async::i2c::Operation<'a>],
-        ) -> Self::TransactionFuture<'a> {
-            let _ = address;
-            let _ = operations;
-            async move { todo!() }
+            fn transaction<'a, 'b>(
+                &'a mut self,
+                address: u8,
+                operations: &'a mut [embedded_hal_async::i2c::Operation<'b>],
+            ) -> Self::TransactionFuture<'a, 'b> {
+                let _ = address;
+                let _ = operations;
+                async move { todo!() }
+            }
         }
     }
 }

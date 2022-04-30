@@ -2,6 +2,7 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use std::collections::{HashMap, HashSet};
 use std::env;
+use std::fmt::Write as _;
 use std::fs;
 use std::path::PathBuf;
 use stm32_metapac::metadata::METADATA;
@@ -104,46 +105,41 @@ fn main() {
     // ========
     // Generate DMA IRQs.
 
-    let mut dma_irqs: HashSet<&str> = HashSet::new();
-    let mut bdma_irqs: HashSet<&str> = HashSet::new();
+    let mut dma_irqs: HashMap<&str, Vec<(&str, &str)>> = HashMap::new();
 
     for p in METADATA.peripherals {
         if let Some(r) = &p.registers {
-            match r.kind {
-                "dma" => {
-                    for irq in p.interrupts {
-                        dma_irqs.insert(irq.interrupt);
-                    }
+            if r.kind == "dma" || r.kind == "bdma" {
+                if p.name == "BDMA1" {
+                    // BDMA1 in H7 doesn't use DMAMUX, which breaks
+                    continue;
                 }
-                "bdma" => {
-                    for irq in p.interrupts {
-                        bdma_irqs.insert(irq.interrupt);
-                    }
+                for irq in p.interrupts {
+                    dma_irqs
+                        .entry(irq.interrupt)
+                        .or_default()
+                        .push((p.name, irq.signal));
                 }
-                _ => {}
             }
         }
     }
 
-    let tokens: Vec<_> = dma_irqs.iter().map(|s| format_ident!("{}", s)).collect();
-    g.extend(quote! {
-        #(
-            #[crate::interrupt]
-            unsafe fn #tokens () {
-                crate::dma::dma::on_irq();
-            }
-        )*
-    });
+    for (irq, channels) in dma_irqs {
+        let irq = format_ident!("{}", irq);
 
-    let tokens: Vec<_> = bdma_irqs.iter().map(|s| format_ident!("{}", s)).collect();
-    g.extend(quote! {
-        #(
+        let channels = channels
+            .iter()
+            .map(|(dma, ch)| format_ident!("{}_{}", dma, ch));
+
+        g.extend(quote! {
             #[crate::interrupt]
-            unsafe fn #tokens () {
-                crate::dma::bdma::on_irq();
+            unsafe fn #irq () {
+                #(
+                    <crate::peripherals::#channels as crate::dma::sealed::Channel>::on_irq();
+                )*
             }
-        )*
-    });
+        });
+    }
 
     // ========
     // Generate RccPeripheral impls
@@ -411,17 +407,17 @@ fn main() {
         (("timer", "BKIN2"), (quote!(crate::pwm::BreakInput2Pin), quote!())),
         (("timer", "BKIN2_COMP1"), (quote!(crate::pwm::BreakInput2Comparator1Pin), quote!())),
         (("timer", "BKIN2_COMP2"), (quote!(crate::pwm::BreakInput2Comparator2Pin), quote!())),
-        (("sdmmc", "CK"), (quote!(crate::sdmmc::CkPin), quote!(#[cfg(feature="sdmmc-rs")]))),
-        (("sdmmc", "CMD"), (quote!(crate::sdmmc::CmdPin), quote!(#[cfg(feature="sdmmc-rs")]))),
-        (("sdmmc", "D0"), (quote!(crate::sdmmc::D0Pin), quote!(#[cfg(feature="sdmmc-rs")]))),
-        (("sdmmc", "D1"), (quote!(crate::sdmmc::D1Pin), quote!(#[cfg(feature="sdmmc-rs")]))),
-        (("sdmmc", "D2"), (quote!(crate::sdmmc::D2Pin), quote!(#[cfg(feature="sdmmc-rs")]))),
-        (("sdmmc", "D3"), (quote!(crate::sdmmc::D3Pin), quote!(#[cfg(feature="sdmmc-rs")]))),
-        (("sdmmc", "D4"), (quote!(crate::sdmmc::D4Pin), quote!(#[cfg(feature="sdmmc-rs")]))),
-        (("sdmmc", "D5"), (quote!(crate::sdmmc::D5Pin), quote!(#[cfg(feature="sdmmc-rs")]))),
-        (("sdmmc", "D6"), (quote!(crate::sdmmc::D6Pin), quote!(#[cfg(feature="sdmmc-rs")]))),
-        (("sdmmc", "D6"), (quote!(crate::sdmmc::D7Pin), quote!(#[cfg(feature="sdmmc-rs")]))),
-        (("sdmmc", "D8"), (quote!(crate::sdmmc::D8Pin), quote!(#[cfg(feature="sdmmc-rs")]))),
+        (("sdmmc", "CK"), (quote!(crate::sdmmc::CkPin), quote!())),
+        (("sdmmc", "CMD"), (quote!(crate::sdmmc::CmdPin), quote!())),
+        (("sdmmc", "D0"), (quote!(crate::sdmmc::D0Pin), quote!())),
+        (("sdmmc", "D1"), (quote!(crate::sdmmc::D1Pin), quote!())),
+        (("sdmmc", "D2"), (quote!(crate::sdmmc::D2Pin), quote!())),
+        (("sdmmc", "D3"), (quote!(crate::sdmmc::D3Pin), quote!())),
+        (("sdmmc", "D4"), (quote!(crate::sdmmc::D4Pin), quote!())),
+        (("sdmmc", "D5"), (quote!(crate::sdmmc::D5Pin), quote!())),
+        (("sdmmc", "D6"), (quote!(crate::sdmmc::D6Pin), quote!())),
+        (("sdmmc", "D6"), (quote!(crate::sdmmc::D7Pin), quote!())),
+        (("sdmmc", "D8"), (quote!(crate::sdmmc::D8Pin), quote!())),
     ].into();
 
     for p in METADATA.peripherals {
@@ -487,6 +483,8 @@ fn main() {
         (("i2c", "TX"), quote!(crate::i2c::TxDma)),
         (("dcmi", "DCMI"), quote!(crate::dcmi::FrameDma)),
         (("dcmi", "PSSI"), quote!(crate::dcmi::FrameDma)),
+        // SDMMCv1 uses the same channel for both directions, so just implement for RX
+        (("sdmmc", "RX"), quote!(crate::sdmmc::SdmmcDma)),
     ]
     .into();
 
@@ -530,10 +528,128 @@ fn main() {
     }
 
     // ========
-    // Write generated.rs
+    // Write foreach_foo! macrotables
+
+    let mut interrupts_table: Vec<Vec<String>> = Vec::new();
+    let mut peripherals_table: Vec<Vec<String>> = Vec::new();
+    let mut pins_table: Vec<Vec<String>> = Vec::new();
+    let mut dma_channels_table: Vec<Vec<String>> = Vec::new();
+
+    let gpio_base = METADATA
+        .peripherals
+        .iter()
+        .find(|p| p.name == "GPIOA")
+        .unwrap()
+        .address as u32;
+    let gpio_stride = 0x400;
+
+    for p in METADATA.peripherals {
+        if let Some(regs) = &p.registers {
+            if regs.kind == "gpio" {
+                let port_letter = p.name.chars().skip(4).next().unwrap();
+                assert_eq!(0, (p.address as u32 - gpio_base) % gpio_stride);
+                let port_num = (p.address as u32 - gpio_base) / gpio_stride;
+
+                for pin_num in 0u32..16 {
+                    let pin_name = format!("P{}{}", port_letter, pin_num);
+                    pins_table.push(vec![
+                        pin_name,
+                        p.name.to_string(),
+                        port_num.to_string(),
+                        pin_num.to_string(),
+                        format!("EXTI{}", pin_num),
+                    ]);
+                }
+            }
+
+            for irq in p.interrupts {
+                let mut row = Vec::new();
+                row.push(p.name.to_string());
+                row.push(regs.kind.to_string());
+                row.push(regs.block.to_string());
+                row.push(irq.signal.to_string());
+                row.push(irq.interrupt.to_ascii_uppercase());
+                interrupts_table.push(row)
+            }
+
+            let mut row = Vec::new();
+            row.push(regs.kind.to_string());
+            row.push(p.name.to_string());
+            peripherals_table.push(row);
+        }
+    }
+
+    let mut dma_channel_count: usize = 0;
+    let mut bdma_channel_count: usize = 0;
+
+    for ch in METADATA.dma_channels {
+        let mut row = Vec::new();
+        let dma_peri = METADATA
+            .peripherals
+            .iter()
+            .find(|p| p.name == ch.dma)
+            .unwrap();
+        let bi = dma_peri.registers.as_ref().unwrap();
+
+        let num;
+        match bi.kind {
+            "dma" => {
+                num = dma_channel_count;
+                dma_channel_count += 1;
+            }
+            "bdma" => {
+                num = bdma_channel_count;
+                bdma_channel_count += 1;
+            }
+            _ => panic!("bad dma channel kind {}", bi.kind),
+        }
+
+        row.push(ch.name.to_string());
+        row.push(ch.dma.to_string());
+        row.push(bi.kind.to_string());
+        row.push(ch.channel.to_string());
+        row.push(num.to_string());
+        if let Some(dmamux) = &ch.dmamux {
+            let dmamux_channel = ch.dmamux_channel.unwrap();
+            row.push(format!(
+                "{{dmamux: {}, dmamux_channel: {}}}",
+                dmamux, dmamux_channel
+            ));
+        } else {
+            row.push("{}".to_string());
+        }
+
+        dma_channels_table.push(row);
+    }
+
+    g.extend(quote! {
+        pub(crate) const DMA_CHANNEL_COUNT: usize = #dma_channel_count;
+        pub(crate) const BDMA_CHANNEL_COUNT: usize = #bdma_channel_count;
+    });
+
+    for irq in METADATA.interrupts {
+        let name = irq.name.to_ascii_uppercase();
+        interrupts_table.push(vec![name.clone()]);
+        if name.contains("EXTI") {
+            interrupts_table.push(vec!["EXTI".to_string(), name.clone()]);
+        }
+    }
+
+    let mut m = String::new();
+
+    make_table(&mut m, "foreach_interrupt", &interrupts_table);
+    make_table(&mut m, "foreach_peripheral", &peripherals_table);
+    make_table(&mut m, "foreach_pin", &pins_table);
+    make_table(&mut m, "foreach_dma_channel", &dma_channels_table);
 
     let out_dir = &PathBuf::from(env::var_os("OUT_DIR").unwrap());
-    let out_file = out_dir.join("generated.rs").to_string_lossy().to_string();
+    let out_file = out_dir.join("_macros.rs").to_string_lossy().to_string();
+    fs::write(out_file, m).unwrap();
+
+    // ========
+    // Write generated.rs
+
+    let out_file = out_dir.join("_generated.rs").to_string_lossy().to_string();
     fs::write(out_file, g.to_string()).unwrap();
 
     // ========
@@ -601,6 +717,8 @@ fn main() {
         Some("tim3") => println!("cargo:rustc-cfg=time_driver_tim3"),
         Some("tim4") => println!("cargo:rustc-cfg=time_driver_tim4"),
         Some("tim5") => println!("cargo:rustc-cfg=time_driver_tim5"),
+        Some("tim12") => println!("cargo:rustc-cfg=time_driver_tim12"),
+        Some("tim15") => println!("cargo:rustc-cfg=time_driver_tim15"),
         Some("any") => {
             if singletons.contains(&"TIM2".to_string()) {
                 println!("cargo:rustc-cfg=time_driver_tim2");
@@ -610,8 +728,12 @@ fn main() {
                 println!("cargo:rustc-cfg=time_driver_tim4");
             } else if singletons.contains(&"TIM5".to_string()) {
                 println!("cargo:rustc-cfg=time_driver_tim5");
+            } else if singletons.contains(&"TIM12".to_string()) {
+                println!("cargo:rustc-cfg=time_driver_tim12");
+            } else if singletons.contains(&"TIM15".to_string()) {
+                println!("cargo:rustc-cfg=time_driver_tim15");
             } else {
-                panic!("time-driver-any requested, but the chip doesn't have TIM2, TIM3, TIM4 or TIM5.")
+                panic!("time-driver-any requested, but the chip doesn't have TIM2, TIM3, TIM4, TIM5, TIM12 or TIM15.")
             }
         }
         _ => panic!("unknown time_driver {:?}", time_driver),
@@ -643,4 +765,31 @@ impl<T: Iterator> IteratorExt for T {
             },
         }
     }
+}
+
+fn make_table(out: &mut String, name: &str, data: &Vec<Vec<String>>) {
+    write!(
+        out,
+        "#[allow(unused)]
+macro_rules! {} {{
+    ($($pat:tt => $code:tt;)*) => {{
+        macro_rules! __{}_inner {{
+            $(($pat) => $code;)*
+            ($_:tt) => {{}}
+        }}
+",
+        name, name
+    )
+    .unwrap();
+
+    for row in data {
+        write!(out, "        __{}_inner!(({}));\n", name, row.join(",")).unwrap();
+    }
+
+    write!(
+        out,
+        "    }};
+}}"
+    )
+    .unwrap();
 }
