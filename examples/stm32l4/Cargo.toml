@@ -8,9 +8,9 @@ resolver = "2"
 [features]
 
 [dependencies]
-embassy = { version = "0.1.0", path = "../../embassy", features = ["defmt" ] }
+embassy = { version = "0.1.0", path = "../../embassy", features = ["defmt", "defmt-timestamp-uptime"] }
 embassy-traits = { version = "0.1.0", path = "../../embassy-traits" }
-embassy-stm32 = { version = "0.1.0", path = "../../embassy-stm32", features = ["nightly", "defmt", "unstable-pac", "stm32l4s5vi", "time-driver-any", "exti", "unstable-traits"]  }
+embassy-stm32 = { version = "0.1.0", path = "../../embassy-stm32", features = ["nightly", "defmt", "unstable-pac", "stm32l4s5vi", "time-driver-any", "exti", "unstable-traits", "usb-otg"]  }
 
 defmt = "0.3"
 defmt-rtt = "0.3"
@@ -18,10 +18,13 @@ defmt-rtt = "0.3"
 cortex-m = "0.7.3"
 cortex-m-rt = "0.7.0"
 embedded-hal = "0.2.6"
-embedded-hal-async = { version = "0.0.1", git = "https://github.com/embassy-rs/embedded-hal", branch = "embassy2"}
+embedded-hal-1 = { package = "embedded-hal", version = "1.0.0-alpha.8" }
+embedded-hal-async = { version = "0.1.0-alpha.0" }
 panic-probe = { version = "0.3", features = ["print-defmt"] }
 futures = { version = "0.3.17", default-features = false, features = ["async-await"] }
 heapless = { version = "0.7.5", default-features = false }
 
 micromath = "2.0.0"
+usb-device = "0.2"
+usbd-serial = "0.1.1"
 

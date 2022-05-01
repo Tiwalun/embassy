@@ -9,6 +9,9 @@ pub use stm32_metapac as pac;
 #[cfg(not(feature = "unstable-pac"))]
 pub(crate) use stm32_metapac as pac;
 
+pub use embassy::util::Unborrow;
+pub use embassy_hal_common::unborrow;
+
 // This must go FIRST so that all the other modules see its macros.
 pub mod fmt;
 include!(concat!(env!("OUT_DIR"), "/_macros.rs"));
@@ -47,6 +50,8 @@ pub mod i2c;
 
 #[cfg(crc)]
 pub mod crc;
+#[cfg(any(flash_l0, flash_l1, flash_wl, flash_wb, flash_l4))]
+pub mod flash;
 pub mod pwm;
 #[cfg(rng)]
 pub mod rng;

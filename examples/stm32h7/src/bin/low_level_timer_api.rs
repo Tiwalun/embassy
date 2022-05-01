@@ -2,20 +2,20 @@
 #![no_main]
 #![feature(type_alias_impl_trait)]
 
-#[path = "../example_common.rs"]
-mod example_common;
 use core::marker::PhantomData;
+use defmt_rtt as _; // global logger
+use panic_probe as _;
 
+use defmt::*;
 use embassy::executor::Spawner;
 use embassy::time::{Duration, Timer};
 use embassy::util::Unborrow;
-use embassy_hal_common::unborrow;
 use embassy_stm32::gpio::low_level::AFType;
 use embassy_stm32::gpio::Speed;
 use embassy_stm32::pwm::*;
 use embassy_stm32::time::{Hertz, U32Ext};
+use embassy_stm32::unborrow;
 use embassy_stm32::{Config, Peripherals};
-use example_common::*;
 
 pub fn config() -> Config {
     let mut config = Config::default();

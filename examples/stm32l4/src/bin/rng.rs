@@ -2,22 +2,23 @@
 #![no_main]
 #![feature(type_alias_impl_trait)]
 
-#[path = "../example_common.rs"]
-mod example_common;
+use defmt::*;
+use defmt_rtt as _; // global logger
 use embassy::executor::Spawner;
 use embassy_stm32::rcc::{ClockSrc, PLLClkDiv, PLLMul, PLLSource, PLLSrcDiv};
 use embassy_stm32::rng::Rng;
 use embassy_stm32::{Config, Peripherals};
-use example_common::*;
+use panic_probe as _;
 
 fn config() -> Config {
     let mut config = Config::default();
+    // 72Mhz clock (16 / 1 * 18 / 4)
     config.rcc.mux = ClockSrc::PLL(
         PLLSource::HSI16,
-        PLLClkDiv::Div2,
+        PLLClkDiv::Div4,
         PLLSrcDiv::Div1,
-        PLLMul::Mul8,
-        Some(PLLClkDiv::Div2),
+        PLLMul::Mul18,
+        Some(PLLClkDiv::Div6), // 48Mhz (16 / 1 * 18 / 6)
     );
     config
 }

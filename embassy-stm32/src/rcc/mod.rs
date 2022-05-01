@@ -5,6 +5,7 @@ use core::mem::MaybeUninit;
 
 #[cfg_attr(rcc_f0, path = "f0.rs")]
 #[cfg_attr(rcc_f1, path = "f1.rs")]
+#[cfg_attr(rcc_f2, path = "f2.rs")]
 #[cfg_attr(rcc_f3, path = "f3.rs")]
 #[cfg_attr(any(rcc_f4, rcc_f410), path = "f4.rs")]
 #[cfg_attr(rcc_f7, path = "f7.rs")]
@@ -14,9 +15,10 @@ use core::mem::MaybeUninit;
 #[cfg_attr(rcc_l0, path = "l0.rs")]
 #[cfg_attr(rcc_l1, path = "l1.rs")]
 #[cfg_attr(rcc_l4, path = "l4.rs")]
+#[cfg_attr(rcc_l5, path = "l5.rs")]
 #[cfg_attr(rcc_u5, path = "u5.rs")]
 #[cfg_attr(rcc_wb, path = "wb.rs")]
-#[cfg_attr(rcc_wl5, path = "wl5.rs")]
+#[cfg_attr(any(rcc_wl5, rcc_wle), path = "wl.rs")]
 mod _version;
 pub use _version::*;
 
@@ -32,7 +34,7 @@ pub struct Clocks {
     pub apb2: Hertz,
     #[cfg(not(rcc_g0))]
     pub apb2_tim: Hertz,
-    #[cfg(any(rcc_wl5, rcc_u5))]
+    #[cfg(any(rcc_wl5, rcc_wle, rcc_u5))]
     pub apb3: Hertz,
     #[cfg(any(rcc_h7, rcc_h7ab))]
     pub apb4: Hertz,
@@ -40,11 +42,13 @@ pub struct Clocks {
     // AHB
     pub ahb1: Hertz,
     #[cfg(any(
-        rcc_l4, rcc_f4, rcc_f410, rcc_f7, rcc_h7, rcc_h7ab, rcc_g4, rcc_u5, rcc_wb, rcc_wl5
+        rcc_l4, rcc_l5, rcc_f2, rcc_f4, rcc_f410, rcc_f7, rcc_h7, rcc_h7ab, rcc_g4, rcc_u5, rcc_wb,
+        rcc_wl5, rcc_wle
     ))]
     pub ahb2: Hertz,
     #[cfg(any(
-        rcc_l4, rcc_f4, rcc_f410, rcc_f7, rcc_h7, rcc_h7ab, rcc_u5, rcc_wb, rcc_wl5
+        rcc_l4, rcc_l5, rcc_f2, rcc_f4, rcc_f410, rcc_f7, rcc_h7, rcc_h7ab, rcc_u5, rcc_wb,
+        rcc_wl5, rcc_wle
     ))]
     pub ahb3: Hertz,
     #[cfg(any(rcc_h7, rcc_h7ab))]
@@ -53,8 +57,6 @@ pub struct Clocks {
     #[cfg(any(rcc_f4, rcc_f410, rcc_f7))]
     pub pll48: Option<Hertz>,
 
-    #[cfg(rcc_f1)]
-    pub adc: Hertz,
     #[cfg(rcc_wb)]
     pub pll_clk: Option<Hertz>,
 
@@ -72,6 +74,9 @@ pub struct Clocks {
 
     #[cfg(rcc_wb)]
     pub lse: Option<Hertz>,
+
+    #[cfg(any(rcc_h7, rcc_h7ab))]
+    pub adc: Option<Hertz>,
 }
 
 /// Frozen clock frequencies

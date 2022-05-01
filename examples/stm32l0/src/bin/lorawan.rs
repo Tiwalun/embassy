@@ -6,8 +6,8 @@
 #![feature(generic_associated_types)]
 #![feature(type_alias_impl_trait)]
 
-#[path = "../example_common.rs"]
-mod example_common;
+use defmt_rtt as _; // global logger
+use panic_probe as _;
 
 use embassy_lora::{sx127x::*, LoraTimer};
 use embassy_stm32::{
@@ -18,8 +18,8 @@ use embassy_stm32::{
     time::U32Ext,
     Peripherals,
 };
+use lorawan::default_crypto::DefaultFactory as Crypto;
 use lorawan_device::async_device::{region, Device, JoinMode};
-use lorawan_encoding::default_crypto::DefaultFactory as Crypto;
 
 fn config() -> embassy_stm32::Config {
     let mut config = embassy_stm32::Config::default();
@@ -54,14 +54,8 @@ async fn main(_spawner: embassy::executor::Spawner, p: Peripherals) {
         .unwrap();
 
     let region = region::EU868::default().into();
-    let mut radio_buffer = [0; 256];
-    let mut device: Device<'_, _, Crypto, _, _> = Device::new(
-        region,
-        radio,
-        LoraTimer,
-        Rng::new(p.RNG),
-        &mut radio_buffer[..],
-    );
+    let mut device: Device<_, Crypto, _, _> =
+        Device::new(region, radio, LoraTimer, Rng::new(p.RNG));
 
     defmt::info!("Joining LoRaWAN network");
 

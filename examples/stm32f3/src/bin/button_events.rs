@@ -10,18 +10,18 @@
 #![no_main]
 #![feature(type_alias_impl_trait)]
 
-#[path = "../example_common.rs"]
-mod example_common;
-use embassy::blocking_mutex::raw::NoopRawMutex;
-use embassy::channel::mpsc::{self, Channel, Receiver, Sender};
+use defmt::*;
+use embassy::blocking_mutex::raw::ThreadModeRawMutex;
+use embassy::channel::channel::Channel;
 use embassy::executor::Spawner;
 use embassy::time::{with_timeout, Duration, Timer};
-use embassy::util::Forever;
 use embassy_stm32::exti::ExtiInput;
 use embassy_stm32::gpio::{AnyPin, Input, Level, Output, Pin, Pull, Speed};
 use embassy_stm32::peripherals::PA0;
 use embassy_stm32::Peripherals;
-use example_common::*;
+
+use defmt_rtt as _; // global logger
+use panic_probe as _;
 
 struct Leds<'a> {
     leds: [Output<'a, AnyPin>; 8],
@@ -50,14 +50,15 @@ impl<'a> Leds<'a> {
         }
     }
 
-    async fn show(&mut self, queue: &mut Receiver<'static, NoopRawMutex, ButtonEvent, 4>) {
+    async fn show(&mut self) {
         self.leds[self.current_led].set_high();
-        if let Ok(new_message) = with_timeout(Duration::from_millis(500), queue.recv()).await {
+        if let Ok(new_message) = with_timeout(Duration::from_millis(500), CHANNEL.recv()).await {
             self.leds[self.current_led].set_low();
             self.process_event(new_message).await;
         } else {
             self.leds[self.current_led].set_low();
-            if let Ok(new_message) = with_timeout(Duration::from_millis(200), queue.recv()).await {
+            if let Ok(new_message) = with_timeout(Duration::from_millis(200), CHANNEL.recv()).await
+            {
                 self.process_event(new_message).await;
             }
         }
@@ -76,15 +77,18 @@ impl<'a> Leds<'a> {
         }
     }
 
-    async fn process_event(&mut self, event: Option<ButtonEvent>) {
+    async fn process_event(&mut self, event: ButtonEvent) {
         match event {
-            Some(ButtonEvent::SingleClick) => self.move_next(),
-            Some(ButtonEvent::DoubleClick) => {
-                self.change_direction();
-                self.move_next()
+            ButtonEvent::SingleClick => {
+                self.move_next();
             }
-            Some(ButtonEvent::Hold) => self.flash().await,
-            _ => {}
+            ButtonEvent::DoubleClick => {
+                self.change_direction();
+                self.move_next();
+            }
+            ButtonEvent::Hold => {
+                self.flash().await;
+            }
         }
     }
 }
@@ -96,7 +100,7 @@ enum ButtonEvent {
     Hold,
 }
 
-static BUTTON_EVENTS_QUEUE: Forever<Channel<NoopRawMutex, ButtonEvent, 4>> = Forever::new();
+static CHANNEL: Channel<ThreadModeRawMutex, ButtonEvent, 4> = Channel::new();
 
 #[embassy::main]
 async fn main(spawner: Spawner, p: Peripherals) {
@@ -115,27 +119,19 @@ async fn main(spawner: Spawner, p: Peripherals) {
     ];
     let leds = Leds::new(leds);
 
-    let buttons_queue = BUTTON_EVENTS_QUEUE.put(Channel::new());
-    let (sender, receiver) = mpsc::split(buttons_queue);
-    spawner.spawn(button_waiter(button, sender)).unwrap();
-    spawner.spawn(led_blinker(leds, receiver)).unwrap();
+    spawner.spawn(button_waiter(button)).unwrap();
+    spawner.spawn(led_blinker(leds)).unwrap();
 }
 
 #[embassy::task]
-async fn led_blinker(
-    mut leds: Leds<'static>,
-    mut queue: Receiver<'static, NoopRawMutex, ButtonEvent, 4>,
-) {
+async fn led_blinker(mut leds: Leds<'static>) {
     loop {
-        leds.show(&mut queue).await;
+        leds.show().await;
     }
 }
 
 #[embassy::task]
-async fn button_waiter(
-    mut button: ExtiInput<'static, PA0>,
-    queue: Sender<'static, NoopRawMutex, ButtonEvent, 4>,
-) {
+async fn button_waiter(mut button: ExtiInput<'static, PA0>) {
     const DOUBLE_CLICK_DELAY: u64 = 250;
     const HOLD_DELAY: u64 = 1000;
 
@@ -149,9 +145,7 @@ async fn button_waiter(
         .is_err()
         {
             info!("Hold");
-            if queue.send(ButtonEvent::Hold).await.is_err() {
-                break;
-            }
+            CHANNEL.send(ButtonEvent::Hold).await;
             button.wait_for_falling_edge().await;
         } else if with_timeout(
             Duration::from_millis(DOUBLE_CLICK_DELAY),
@@ -160,15 +154,11 @@ async fn button_waiter(
         .await
         .is_err()
         {
-            if queue.send(ButtonEvent::SingleClick).await.is_err() {
-                break;
-            }
             info!("Single click");
+            CHANNEL.send(ButtonEvent::SingleClick).await;
         } else {
             info!("Double click");
-            if queue.send(ButtonEvent::DoubleClick).await.is_err() {
-                break;
-            }
+            CHANNEL.send(ButtonEvent::DoubleClick).await;
             button.wait_for_falling_edge().await;
         }
         button.wait_for_rising_edge().await;

@@ -2,11 +2,7 @@
 #![no_main]
 #![feature(type_alias_impl_trait)]
 
-#[path = "../example_common.rs"]
-mod example_common;
-
 use core::cell::RefCell;
-
 use defmt::*;
 use embassy::executor::Spawner;
 use embassy::time::Delay;
@@ -26,6 +22,9 @@ use st7789::{Orientation, ST7789};
 use crate::my_display_interface::SPIDeviceInterface;
 use crate::shared_spi::SpiDeviceWithCs;
 use crate::touch::Touch;
+
+use defmt_rtt as _; // global logger
+use panic_probe as _;
 
 //const DISPLAY_FREQ: u32 = 64_000_000;
 const TOUCH_FREQ: u32 = 200_000;
@@ -111,9 +110,9 @@ mod shared_spi {
     use core::cell::RefCell;
     use core::fmt::Debug;
 
-    use embedded_hal::digital::blocking::OutputPin;
-    use embedded_hal::spi;
-    use embedded_hal::spi::blocking::SpiDevice;
+    use embedded_hal_1::digital::blocking::OutputPin;
+    use embedded_hal_1::spi;
+    use embedded_hal_1::spi::blocking::SpiDevice;
 
     #[derive(Copy, Clone, Eq, PartialEq, Debug)]
     pub enum SpiDeviceWithCsError<BUS, CS> {
@@ -185,7 +184,7 @@ mod shared_spi {
 
 /// Driver for the XPT2046 resistive touchscreen sensor
 mod touch {
-    use embedded_hal::spi::blocking::{SpiBus, SpiBusRead, SpiBusWrite, SpiDevice};
+    use embedded_hal_1::spi::blocking::{SpiBus, SpiBusRead, SpiBusWrite, SpiDevice};
 
     struct Calibration {
         x1: i32,
@@ -249,8 +248,8 @@ mod touch {
 
 mod my_display_interface {
     use display_interface::{DataFormat, DisplayError, WriteOnlyDataCommand};
-    use embedded_hal::digital::blocking::OutputPin;
-    use embedded_hal::spi::blocking::{SpiBusWrite, SpiDevice};
+    use embedded_hal_1::digital::blocking::OutputPin;
+    use embedded_hal_1::spi::blocking::{SpiBusWrite, SpiDevice};
 
     /// SPI display interface.
     ///

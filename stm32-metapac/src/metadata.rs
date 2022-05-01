@@ -15,6 +15,14 @@ pub struct MemoryRegion {
     pub kind: MemoryRegionKind,
     pub address: u32,
     pub size: u32,
+    pub settings: Option<FlashSettings>,
+}
+
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub struct FlashSettings {
+    pub erase_size: u32,
+    pub write_size: u32,
+    pub erase_value: u8,
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]
@@ -93,5 +101,6 @@ pub struct PeripheralDmaChannel {
     pub signal: &'static str,
     pub channel: Option<&'static str>,
     pub dmamux: Option<&'static str>,
+    pub dma: Option<&'static str>,
     pub request: Option<u32>,
 }

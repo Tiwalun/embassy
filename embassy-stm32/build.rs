@@ -109,7 +109,7 @@ fn main() {
 
     for p in METADATA.peripherals {
         if let Some(r) = &p.registers {
-            if r.kind == "dma" || r.kind == "bdma" {
+            if r.kind == "dma" || r.kind == "bdma" || r.kind == "gpdma" {
                 if p.name == "BDMA1" {
                     // BDMA1 in H7 doesn't use DMAMUX, which breaks
                     continue;
@@ -145,7 +145,10 @@ fn main() {
     // Generate RccPeripheral impls
 
     for p in METADATA.peripherals {
-        if !singletons.contains(&p.name.to_string()) {
+        // generating RccPeripheral impl for H7 ADC3 would result in bad frequency
+        if !singletons.contains(&p.name.to_string())
+            || (p.name == "ADC3" && METADATA.line.starts_with("STM32H7"))
+        {
             continue;
         }
 
@@ -166,6 +169,15 @@ fn main() {
                 None => TokenStream::new(),
             };
 
+            let after_enable = if chip_name.starts_with("stm32f2") {
+                // Errata: ES0005 - 2.1.11 Delay after an RCC peripheral clock enabling
+                quote! {
+                    cortex_m::asm::dsb();
+                }
+            } else {
+                TokenStream::new()
+            };
+
             let pname = format_ident!("{}", p.name);
             let clk = format_ident!("{}", rcc.clock.to_ascii_lowercase());
             let en_reg = format_ident!("{}", en.register.to_ascii_lowercase());
@@ -180,7 +192,8 @@ fn main() {
                     }
                     fn enable() {
                         critical_section::with(|_| unsafe {
-                            crate::pac::RCC.#en_reg().modify(|w| w.#set_en_field(true))
+                            crate::pac::RCC.#en_reg().modify(|w| w.#set_en_field(true));
+                            #after_enable
                         })
                     }
                     fn disable() {
@@ -201,7 +214,7 @@ fn main() {
     // ========
     // Generate fns to enable GPIO, DMA in RCC
 
-    for kind in ["dma", "bdma", "dmamux", "gpio"] {
+    for kind in ["dma", "bdma", "dmamux", "gpdma", "gpio"] {
         let mut gg = TokenStream::new();
 
         for p in METADATA.peripherals {
@@ -449,11 +462,23 @@ fn main() {
                 if regs.kind == "adc" {
                     let peri = format_ident!("{}", p.name);
                     let pin_name = format_ident!("{}", pin.pin);
-                    let ch: u8 = pin.signal.strip_prefix("IN").unwrap().parse().unwrap();
 
-                    g.extend(quote! {
-                        impl_adc_pin!( #peri, #pin_name, #ch);
-                    })
+                    // H7 has differential voltage measurements
+                    let ch: Option<u8> = if pin.signal.starts_with("INP") {
+                        Some(pin.signal.strip_prefix("INP").unwrap().parse().unwrap())
+                    } else if pin.signal.starts_with("INN") {
+                        // TODO handle in the future when embassy supports differential measurements
+                        None
+                    } else if pin.signal.starts_with("IN") {
+                        Some(pin.signal.strip_prefix("IN").unwrap().parse().unwrap())
+                    } else {
+                        None
+                    };
+                    if let Some(ch) = ch {
+                        g.extend(quote! {
+                            impl_adc_pin!( #peri, #pin_name, #ch);
+                        })
+                    }
                 }
 
                 // DAC is special
@@ -503,11 +528,17 @@ fn main() {
                     let peri = format_ident!("{}", p.name);
 
                     let channel = if let Some(channel) = &ch.channel {
+                        // Chip with DMA/BDMA, without DMAMUX
                         let channel = format_ident!("{}", channel);
                         quote!({channel: #channel})
                     } else if let Some(dmamux) = &ch.dmamux {
+                        // Chip with DMAMUX
                         let dmamux = format_ident!("{}", dmamux);
                         quote!({dmamux: #dmamux})
+                    } else if let Some(dma) = &ch.dma {
+                        // Chip with GPDMA
+                        let dma = format_ident!("{}", dma);
+                        quote!({dma: #dma})
                     } else {
                         unreachable!();
                     };
@@ -581,6 +612,7 @@ fn main() {
 
     let mut dma_channel_count: usize = 0;
     let mut bdma_channel_count: usize = 0;
+    let mut gpdma_channel_count: usize = 0;
 
     for ch in METADATA.dma_channels {
         let mut row = Vec::new();
@@ -600,6 +632,10 @@ fn main() {
             "bdma" => {
                 num = bdma_channel_count;
                 bdma_channel_count += 1;
+            }
+            "gpdma" => {
+                num = gpdma_channel_count;
+                gpdma_channel_count += 1;
             }
             _ => panic!("bad dma channel kind {}", bi.kind),
         }
@@ -625,6 +661,7 @@ fn main() {
     g.extend(quote! {
         pub(crate) const DMA_CHANNEL_COUNT: usize = #dma_channel_count;
         pub(crate) const BDMA_CHANNEL_COUNT: usize = #bdma_channel_count;
+        pub(crate) const GPDMA_CHANNEL_COUNT: usize = #gpdma_channel_count;
     });
 
     for irq in METADATA.interrupts {

@@ -91,6 +91,7 @@ pub mod uarte;
     feature = "nrf52833",
     feature = "nrf52840"
 ))]
+#[cfg(feature = "nightly")]
 pub mod usb;
 #[cfg(not(feature = "_nrf5340"))]
 pub mod wdt;
@@ -114,6 +115,9 @@ pub use chip::EASY_DMA_SIZE;
 pub use chip::pac;
 #[cfg(not(feature = "unstable-pac"))]
 pub(crate) use chip::pac;
+
+pub use embassy::util::Unborrow;
+pub use embassy_hal_common::unborrow;
 
 pub use chip::{peripherals, Peripherals};
 

@@ -57,16 +57,16 @@
 #![no_main]
 #![feature(type_alias_impl_trait)]
 
-#[path = "../example_common.rs"]
-mod example_common;
-use example_common::*;
-
 use cortex_m_rt::entry;
+use defmt::{info, unwrap};
 use embassy::executor::{Executor, InterruptExecutor};
 use embassy::interrupt::InterruptExt;
 use embassy::time::{Duration, Instant, Timer};
 use embassy::util::Forever;
 use embassy_nrf::interrupt;
+
+use defmt_rtt as _; // global logger
+use panic_probe as _;
 
 #[embassy::task]
 async fn run_high() {
@@ -124,17 +124,15 @@ fn main() -> ! {
     let irq = interrupt::take!(SWI1_EGU1);
     irq.set_priority(interrupt::Priority::P6);
     let executor = EXECUTOR_HIGH.put(InterruptExecutor::new(irq));
-    executor.start(|spawner| {
-        unwrap!(spawner.spawn(run_high()));
-    });
+    let spawner = executor.start();
+    unwrap!(spawner.spawn(run_high()));
 
     // Medium-priority executor: SWI0_EGU0, priority level 7
     let irq = interrupt::take!(SWI0_EGU0);
     irq.set_priority(interrupt::Priority::P7);
     let executor = EXECUTOR_MED.put(InterruptExecutor::new(irq));
-    executor.start(|spawner| {
-        unwrap!(spawner.spawn(run_med()));
-    });
+    let spawner = executor.start();
+    unwrap!(spawner.spawn(run_med()));
 
     // Low priority executor: runs in thread mode, using WFE/SEV
     let executor = EXECUTOR_LOW.put(Executor::new());

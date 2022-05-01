@@ -10,12 +10,10 @@ struct Args {
     #[darling(default)]
     pool_size: Option<usize>,
     #[darling(default)]
-    send: bool,
-    #[darling(default)]
     embassy_prefix: ModulePrefix,
 }
 
-pub fn run(args: syn::AttributeArgs, mut f: syn::ItemFn) -> Result<TokenStream, TokenStream> {
+pub fn run(args: syn::AttributeArgs, f: syn::ItemFn) -> Result<TokenStream, TokenStream> {
     let args = Args::from_list(&args).map_err(|e| e.write_errors())?;
 
     let embassy_prefix = args.embassy_prefix.append("embassy");
@@ -35,8 +33,7 @@ pub fn run(args: syn::AttributeArgs, mut f: syn::ItemFn) -> Result<TokenStream, 
         ctxt.error_spanned_by(&f.sig, "pool_size must be 1 or greater");
     }
 
-    let mut arg_names: syn::punctuated::Punctuated<syn::Ident, syn::Token![,]> =
-        syn::punctuated::Punctuated::new();
+    let mut arg_names = Vec::new();
     let mut fargs = f.sig.inputs.clone();
 
     for arg in fargs.iter_mut() {
@@ -45,14 +42,14 @@ pub fn run(args: syn::AttributeArgs, mut f: syn::ItemFn) -> Result<TokenStream, 
                 ctxt.error_spanned_by(arg, "task functions must not have receiver arguments");
             }
             syn::FnArg::Typed(t) => match t.pat.as_mut() {
-                syn::Pat::Ident(i) => {
-                    arg_names.push(i.ident.clone());
-                    i.mutability = None;
+                syn::Pat::Ident(id) => {
+                    arg_names.push(id.ident.clone());
+                    id.mutability = None;
                 }
                 _ => {
                     ctxt.error_spanned_by(
                         arg,
-                        "pattern matching in task arguments is not yet supporteds",
+                        "pattern matching in task arguments is not yet supported",
                     );
                 }
             },
@@ -61,28 +58,25 @@ pub fn run(args: syn::AttributeArgs, mut f: syn::ItemFn) -> Result<TokenStream, 
 
     ctxt.check()?;
 
-    let name = f.sig.ident.clone();
+    let task_ident = f.sig.ident.clone();
+    let task_inner_ident = format_ident!("__{}_task", task_ident);
 
-    let visibility = &f.vis;
-    f.sig.ident = format_ident!("task");
-    let impl_ty = if args.send {
-        quote!(impl ::core::future::Future + Send + 'static)
-    } else {
-        quote!(impl ::core::future::Future + 'static)
-    };
-
-    let attrs = &f.attrs;
+    let mut task_inner = f;
+    let visibility = task_inner.vis.clone();
+    task_inner.vis = syn::Visibility::Inherited;
+    task_inner.sig.ident = task_inner_ident.clone();
 
     let result = quote! {
-        #(#attrs)*
-        #visibility fn #name(#fargs) -> #embassy_path::executor::SpawnToken<#impl_ty> {
-            use #embassy_path::executor::raw::TaskStorage;
-            #f
-            type F = #impl_ty;
-            #[allow(clippy::declare_interior_mutable_const)]
-            const NEW_TASK: TaskStorage<F> = TaskStorage::new();
-            static POOL: [TaskStorage<F>; #pool_size] = [NEW_TASK; #pool_size];
-            unsafe { TaskStorage::spawn_pool(&POOL, move || task(#arg_names)) }
+        // This is the user's task function, renamed.
+        // We put it outside the #task_ident fn below, because otherwise
+        // the items defined there (such as POOL) would be in scope
+        // in the user's code.
+        #task_inner
+
+        #visibility fn #task_ident(#fargs) -> #embassy_path::executor::SpawnToken<impl Sized> {
+            type Fut = impl ::core::future::Future + 'static;
+            static POOL: #embassy_path::executor::raw::TaskPool<Fut, #pool_size> = #embassy_path::executor::raw::TaskPool::new();
+            unsafe { POOL._spawn_async_fn(move || #task_inner_ident(#(#arg_names,)*)) }
         }
     };
 

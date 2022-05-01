@@ -2,15 +2,15 @@
 #![no_main]
 #![feature(type_alias_impl_trait)]
 
-#[path = "../example_common.rs"]
-mod example_common;
-
 use core::mem;
+use defmt::{info, unwrap};
 use embassy::executor::Spawner;
 use embassy::time::{Duration, Timer};
 use embassy_nrf::Peripherals;
 use embassy_nrf::{interrupt, qspi};
-use example_common::*;
+
+use defmt_rtt as _; // global logger
+use panic_probe as _;
 
 // Workaround for alignment requirements.
 // Nicer API will probably come in the future.
@@ -32,7 +32,7 @@ async fn main(_spawner: Spawner, mut p: Peripherals) {
             exit_time: 3,  // tRDP = 35uS
         });
 
-        let mut q = qspi::Qspi::new(
+        let mut q: qspi::Qspi<_, 67108864> = qspi::Qspi::new(
             &mut p.QSPI,
             &mut irq,
             &mut p.P0_19,
@@ -42,8 +42,7 @@ async fn main(_spawner: Spawner, mut p: Peripherals) {
             &mut p.P0_22,
             &mut p.P0_23,
             config,
-        )
-        .await;
+        );
 
         let mut id = [1; 3];
         unwrap!(q.custom_instruction(0x9F, &[], &mut id).await);

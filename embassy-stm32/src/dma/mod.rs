@@ -4,6 +4,8 @@ pub(crate) mod bdma;
 pub(crate) mod dma;
 #[cfg(dmamux)]
 mod dmamux;
+#[cfg(gpdma)]
+mod gpdma;
 
 #[cfg(dmamux)]
 pub use dmamux::*;
@@ -24,9 +26,9 @@ pub mod low_level {
 
 pub(crate) use transfers::*;
 
-#[cfg(any(bdma_v2, dma_v2, dmamux))]
+#[cfg(any(bdma_v2, dma_v2, dmamux, gpdma))]
 pub type Request = u8;
-#[cfg(not(any(bdma_v2, dma_v2, dmamux)))]
+#[cfg(not(any(bdma_v2, dma_v2, dmamux, gpdma)))]
 pub type Request = ();
 
 pub(crate) mod sealed {
@@ -76,6 +78,25 @@ pub(crate) mod sealed {
             options: TransferOptions,
         );
 
+        /// DMA double-buffered mode is unsafe as UB can happen when the hardware writes to a buffer currently owned by the software
+        /// more information can be found here: https://github.com/embassy-rs/embassy/issues/702
+        /// This feature is now used solely for the purposes of implementing giant DMA transfers required for DCMI
+        unsafe fn start_double_buffered_read<W: super::Word>(
+            &mut self,
+            request: Request,
+            reg_addr: *const W,
+            buffer0: *mut W,
+            buffer1: *mut W,
+            buffer_len: usize,
+            options: TransferOptions,
+        );
+
+        unsafe fn set_buffer0<W: super::Word>(&mut self, buffer: *mut W);
+
+        unsafe fn set_buffer1<W: super::Word>(&mut self, buffer: *mut W);
+
+        unsafe fn is_buffer0_accessible(&mut self) -> bool;
+
         /// Requests the channel to stop.
         /// NOTE: The channel does not immediately stop, you have to wait
         /// for `is_running() = false`.
@@ -99,11 +120,24 @@ pub(crate) mod sealed {
     }
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum WordSize {
     OneByte,
     TwoBytes,
     FourBytes,
 }
+
+impl WordSize {
+    pub fn bytes(&self) -> usize {
+        match self {
+            Self::OneByte => 1,
+            Self::TwoBytes => 2,
+            Self::FourBytes => 4,
+        }
+    }
+}
+
 pub trait Word: sealed::Word {
     fn bits() -> WordSize;
 }
@@ -129,7 +163,8 @@ impl Word for u32 {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum Burst {
     /// Single transfer
     Single,
@@ -141,7 +176,8 @@ pub enum Burst {
     Incr16,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum FlowControl {
     /// Flow control by DMA
     Dma,
@@ -149,6 +185,8 @@ pub enum FlowControl {
     Peripheral,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct TransferOptions {
     /// Peripheral burst transfer configuration
     pub pburst: Burst,
@@ -280,6 +318,8 @@ pub(crate) unsafe fn init() {
     dma::init();
     #[cfg(dmamux)]
     dmamux::init();
+    #[cfg(gpdma)]
+    gpdma::init();
 }
 
 // TODO: replace transmutes with core::ptr::metadata once it's stable

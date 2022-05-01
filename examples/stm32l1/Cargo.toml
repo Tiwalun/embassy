@@ -6,7 +6,7 @@ version = "0.1.0"
 resolver = "2"
 
 [dependencies]
-embassy = { version = "0.1.0", path = "../../embassy", features = ["defmt"] }
+embassy = { version = "0.1.0", path = "../../embassy", features = ["defmt", "defmt-timestamp-uptime"] }
 embassy-stm32 = { version = "0.1.0", path = "../../embassy-stm32", features = ["nightly", "defmt", "stm32l151cb-a", "time-driver-any", "memory-x"]  }
 
 defmt = "0.3"
@@ -18,3 +18,4 @@ embedded-hal = "0.2.6"
 panic-probe = { version = "0.3", features = ["print-defmt"] }
 futures = { version = "0.3.17", default-features = false, features = ["async-await"] }
 heapless = { version = "0.7.5", default-features = false }
+embedded-storage = "0.3.0"

@@ -6,6 +6,9 @@ edition = "2018"
 resolver = "2"
 
 [package.metadata.embassy_docs]
+src_base = "https://github.com/embassy-rs/embassy/blob/embassy-stm32-v$VERSION/embassy-stm32/src/"
+src_base_git = "https://github.com/embassy-rs/embassy/blob/master/embassy-stm32/src/"
+
 # TODO: sdmmc
 # TODO: net
 # TODO: subghz
@@ -23,6 +26,7 @@ flavors = [
     { regex_feature = "stm32l0.*", target = "thumbv6m-none-eabi" },
     { regex_feature = "stm32l1.*", target = "thumbv7m-none-eabi" },
     { regex_feature = "stm32l4.*", target = "thumbv7em-none-eabi" },
+    { regex_feature = "stm32l5.*", target = "thumbv8m.main-none-eabihf" },
     { regex_feature = "stm32u5.*", target = "thumbv8m.main-none-eabihf" },
     { regex_feature = "stm32wb.*", target = "thumbv7em-none-eabi" },
     { regex_feature = "stm32wl.*", target = "thumbv7em-none-eabi" },
@@ -32,11 +36,14 @@ flavors = [
 embassy = { version = "0.1.0", path = "../embassy" }
 embassy-macros = { version = "0.1.0", path = "../embassy-macros", features = ["stm32"] }
 embassy-hal-common = {version = "0.1.0", path = "../embassy-hal-common" }
-embassy-net = { version = "0.1.0", path = "../embassy-net", default-features = false, optional = true }
+embassy-net = { version = "0.1.0", path = "../embassy-net", optional = true }
 
 embedded-hal-02 = { package = "embedded-hal", version = "0.2.6", features = ["unproven"] }
-embedded-hal-1 = { package = "embedded-hal", version = "1.0.0-alpha.7", git = "https://github.com/embassy-rs/embedded-hal", branch = "embassy2", optional = true}
-embedded-hal-async = { version = "0.0.1", git = "https://github.com/embassy-rs/embedded-hal", branch = "embassy2", optional = true}
+embedded-hal-1 = { package = "embedded-hal", version = "1.0.0-alpha.8", optional = true}
+embedded-hal-async = { version = "0.1.0-alpha.0", optional = true}
+
+embedded-storage = "0.3.0"
+embedded-storage-async = { version = "0.3.0", optional = true }
 
 defmt = { version = "0.3", optional = true }
 log = { version = "0.4.14", optional = true }
@@ -83,7 +90,7 @@ time-driver-tim12 = ["_time-driver"]
 time-driver-tim15 = ["_time-driver"]
 
 # Enable nightly-only features
-nightly = ["embassy/nightly", "embedded-hal-1", "embedded-hal-async"]
+nightly = ["embassy/nightly", "embedded-hal-1", "embedded-hal-async", "embedded-storage-async"]
 
 # Reexport stm32-metapac at `embassy_stm32::pac`.
 # This is unstable because semver-minor (non-breaking) releases of embassy-stm32 may major-bump (breaking) the stm32-metapac version.
@@ -265,6 +272,44 @@ stm32f107rb = [ "stm32-metapac/stm32f107rb" ]
 stm32f107rc = [ "stm32-metapac/stm32f107rc" ]
 stm32f107vb = [ "stm32-metapac/stm32f107vb" ]
 stm32f107vc = [ "stm32-metapac/stm32f107vc" ]
+stm32f205rb = [ "stm32-metapac/stm32f205rb" ]
+stm32f205rc = [ "stm32-metapac/stm32f205rc" ]
+stm32f205re = [ "stm32-metapac/stm32f205re" ]
+stm32f205rf = [ "stm32-metapac/stm32f205rf" ]
+stm32f205rg = [ "stm32-metapac/stm32f205rg" ]
+stm32f205vb = [ "stm32-metapac/stm32f205vb" ]
+stm32f205vc = [ "stm32-metapac/stm32f205vc" ]
+stm32f205ve = [ "stm32-metapac/stm32f205ve" ]
+stm32f205vf = [ "stm32-metapac/stm32f205vf" ]
+stm32f205vg = [ "stm32-metapac/stm32f205vg" ]
+stm32f205zc = [ "stm32-metapac/stm32f205zc" ]
+stm32f205ze = [ "stm32-metapac/stm32f205ze" ]
+stm32f205zf = [ "stm32-metapac/stm32f205zf" ]
+stm32f205zg = [ "stm32-metapac/stm32f205zg" ]
+stm32f207ic = [ "stm32-metapac/stm32f207ic" ]
+stm32f207ie = [ "stm32-metapac/stm32f207ie" ]
+stm32f207if = [ "stm32-metapac/stm32f207if" ]
+stm32f207ig = [ "stm32-metapac/stm32f207ig" ]
+stm32f207vc = [ "stm32-metapac/stm32f207vc" ]
+stm32f207ve = [ "stm32-metapac/stm32f207ve" ]
+stm32f207vf = [ "stm32-metapac/stm32f207vf" ]
+stm32f207vg = [ "stm32-metapac/stm32f207vg" ]
+stm32f207zc = [ "stm32-metapac/stm32f207zc" ]
+stm32f207ze = [ "stm32-metapac/stm32f207ze" ]
+stm32f207zf = [ "stm32-metapac/stm32f207zf" ]
+stm32f207zg = [ "stm32-metapac/stm32f207zg" ]
+stm32f215re = [ "stm32-metapac/stm32f215re" ]
+stm32f215rg = [ "stm32-metapac/stm32f215rg" ]
+stm32f215ve = [ "stm32-metapac/stm32f215ve" ]
+stm32f215vg = [ "stm32-metapac/stm32f215vg" ]
+stm32f215ze = [ "stm32-metapac/stm32f215ze" ]
+stm32f215zg = [ "stm32-metapac/stm32f215zg" ]
+stm32f217ie = [ "stm32-metapac/stm32f217ie" ]
+stm32f217ig = [ "stm32-metapac/stm32f217ig" ]
+stm32f217ve = [ "stm32-metapac/stm32f217ve" ]
+stm32f217vg = [ "stm32-metapac/stm32f217vg" ]
+stm32f217ze = [ "stm32-metapac/stm32f217ze" ]
+stm32f217zg = [ "stm32-metapac/stm32f217zg" ]
 stm32f301c6 = [ "stm32-metapac/stm32f301c6" ]
 stm32f301c8 = [ "stm32-metapac/stm32f301c8" ]
 stm32f301k6 = [ "stm32-metapac/stm32f301k6" ]
@@ -1235,6 +1280,23 @@ stm32l4s7zi = [ "stm32-metapac/stm32l4s7zi" ]
 stm32l4s9ai = [ "stm32-metapac/stm32l4s9ai" ]
 stm32l4s9vi = [ "stm32-metapac/stm32l4s9vi" ]
 stm32l4s9zi = [ "stm32-metapac/stm32l4s9zi" ]
+stm32l552cc = [ "stm32-metapac/stm32l552cc" ]
+stm32l552ce = [ "stm32-metapac/stm32l552ce" ]
+stm32l552me = [ "stm32-metapac/stm32l552me" ]
+stm32l552qc = [ "stm32-metapac/stm32l552qc" ]
+stm32l552qe = [ "stm32-metapac/stm32l552qe" ]
+stm32l552rc = [ "stm32-metapac/stm32l552rc" ]
+stm32l552re = [ "stm32-metapac/stm32l552re" ]
+stm32l552vc = [ "stm32-metapac/stm32l552vc" ]
+stm32l552ve = [ "stm32-metapac/stm32l552ve" ]
+stm32l552zc = [ "stm32-metapac/stm32l552zc" ]
+stm32l552ze = [ "stm32-metapac/stm32l552ze" ]
+stm32l562ce = [ "stm32-metapac/stm32l562ce" ]
+stm32l562me = [ "stm32-metapac/stm32l562me" ]
+stm32l562qe = [ "stm32-metapac/stm32l562qe" ]
+stm32l562re = [ "stm32-metapac/stm32l562re" ]
+stm32l562ve = [ "stm32-metapac/stm32l562ve" ]
+stm32l562ze = [ "stm32-metapac/stm32l562ze" ]
 stm32u575ag = [ "stm32-metapac/stm32u575ag" ]
 stm32u575ai = [ "stm32-metapac/stm32u575ai" ]
 stm32u575cg = [ "stm32-metapac/stm32u575cg" ]
@@ -1258,6 +1320,12 @@ stm32u585ri = [ "stm32-metapac/stm32u585ri" ]
 stm32u585vi = [ "stm32-metapac/stm32u585vi" ]
 stm32u585ze = [ "stm32-metapac/stm32u585ze" ]
 stm32u585zi = [ "stm32-metapac/stm32u585zi" ]
+stm32wb10cc = [ "stm32-metapac/stm32wb10cc" ]
+stm32wb15cc = [ "stm32-metapac/stm32wb15cc" ]
+stm32wb30ce = [ "stm32-metapac/stm32wb30ce" ]
+stm32wb35cc = [ "stm32-metapac/stm32wb35cc" ]
+stm32wb35ce = [ "stm32-metapac/stm32wb35ce" ]
+stm32wb50cg = [ "stm32-metapac/stm32wb50cg" ]
 stm32wb55cc = [ "stm32-metapac/stm32wb55cc" ]
 stm32wb55ce = [ "stm32-metapac/stm32wb55ce" ]
 stm32wb55cg = [ "stm32-metapac/stm32wb55cg" ]
@@ -1268,10 +1336,29 @@ stm32wb55vc = [ "stm32-metapac/stm32wb55vc" ]
 stm32wb55ve = [ "stm32-metapac/stm32wb55ve" ]
 stm32wb55vg = [ "stm32-metapac/stm32wb55vg" ]
 stm32wb55vy = [ "stm32-metapac/stm32wb55vy" ]
+stm32wb5mmg = [ "stm32-metapac/stm32wb5mmg" ]
+stm32wl54cc-cm4 = [ "stm32-metapac/stm32wl54cc-cm4" ]
+stm32wl54cc-cm0p = [ "stm32-metapac/stm32wl54cc-cm0p" ]
+stm32wl54jc-cm4 = [ "stm32-metapac/stm32wl54jc-cm4" ]
+stm32wl54jc-cm0p = [ "stm32-metapac/stm32wl54jc-cm0p" ]
 stm32wl55cc-cm4 = [ "stm32-metapac/stm32wl55cc-cm4" ]
 stm32wl55cc-cm0p = [ "stm32-metapac/stm32wl55cc-cm0p" ]
 stm32wl55jc-cm4 = [ "stm32-metapac/stm32wl55jc-cm4" ]
 stm32wl55jc-cm0p = [ "stm32-metapac/stm32wl55jc-cm0p" ]
 stm32wl55uc-cm4 = [ "stm32-metapac/stm32wl55uc-cm4" ]
 stm32wl55uc-cm0p = [ "stm32-metapac/stm32wl55uc-cm0p" ]
+stm32wle4c8 = [ "stm32-metapac/stm32wle4c8" ]
+stm32wle4cb = [ "stm32-metapac/stm32wle4cb" ]
+stm32wle4cc = [ "stm32-metapac/stm32wle4cc" ]
+stm32wle4j8 = [ "stm32-metapac/stm32wle4j8" ]
+stm32wle4jb = [ "stm32-metapac/stm32wle4jb" ]
+stm32wle4jc = [ "stm32-metapac/stm32wle4jc" ]
+stm32wle5c8 = [ "stm32-metapac/stm32wle5c8" ]
+stm32wle5cb = [ "stm32-metapac/stm32wle5cb" ]
+stm32wle5cc = [ "stm32-metapac/stm32wle5cc" ]
+stm32wle5j8 = [ "stm32-metapac/stm32wle5j8" ]
+stm32wle5jb = [ "stm32-metapac/stm32wle5jb" ]
+stm32wle5jc = [ "stm32-metapac/stm32wle5jc" ]
+stm32wle5u8 = [ "stm32-metapac/stm32wle5u8" ]
+stm32wle5ub = [ "stm32-metapac/stm32wle5ub" ]
 # END GENERATED FEATURES

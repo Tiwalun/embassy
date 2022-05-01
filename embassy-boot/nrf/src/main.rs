@@ -22,7 +22,11 @@ fn main() -> ! {
     */
 
     let mut bl = BootLoader::default();
-    let start = bl.prepare(&mut WatchdogFlash::start(Nvmc::new(p.NVMC), p.WDT, 5));
+    let start = bl.prepare(&mut SingleFlashProvider::new(&mut WatchdogFlash::start(
+        Nvmc::new(p.NVMC),
+        p.WDT,
+        5,
+    )));
     unsafe { bl.load(start) }
 }
 
@@ -42,8 +46,5 @@ unsafe fn DefaultHandler(_: i16) -> ! {
 
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
-    unsafe {
-        cortex_m::asm::udf();
-        core::hint::unreachable_unchecked();
-    }
+    cortex_m::asm::udf();
 }
