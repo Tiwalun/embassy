@@ -1,6 +1,5 @@
 use crate::pac;
-use crate::pac::{FLASH, PWR};
-use crate::peripherals::{self, RCC};
+use crate::pac::{FLASH, PWR, RCC};
 use crate::rcc::{get_freqs, set_freqs, Clocks};
 use crate::time::Hertz;
 use crate::time::U32Ext;
@@ -213,17 +212,18 @@ pub enum StopWakeupClock {
 }
 
 /// Clocks configutation
+#[non_exhaustive]
 pub struct Config {
-    mux: ClockSrc,
-    cpu1_hdiv: HDivider,
-    cpu2_hdiv: HDivider,
-    ahb_pre: AHBPrescaler,
-    apb1_pre: APBPrescaler,
-    apb2_pre: APBPrescaler,
-    pll_config: PllConfig,
-    stop_wakeup_clk: StopWakeupClock,
-    with_lse: bool,
-    rtc_src: RtcClkSrc,
+    pub mux: ClockSrc,
+    pub cpu1_hdiv: HDivider,
+    pub cpu2_hdiv: HDivider,
+    pub ahb_pre: AHBPrescaler,
+    pub apb1_pre: APBPrescaler,
+    pub apb2_pre: APBPrescaler,
+    pub pll_config: PllConfig,
+    pub stop_wakeup_clk: StopWakeupClock,
+    pub with_lse: bool,
+    pub rtc_src: RtcClkSrc,
 }
 
 impl Default for Config {
@@ -244,379 +244,283 @@ impl Default for Config {
     }
 }
 
-impl Config {
-    #[inline]
-    pub fn clock_src(mut self, mux: ClockSrc) -> Self {
-        self.mux = mux;
-        self
-    }
-
-    #[inline]
-    pub fn cpu1_hdiv(mut self, div: HDivider) -> Self {
-        self.cpu1_hdiv = div;
-        self
-    }
-
-    #[inline]
-    pub fn cpu2_hdiv(mut self, div: HDivider) -> Self {
-        self.cpu2_hdiv = div;
-        self
-    }
-
-    #[inline]
-    pub fn ahb_pre(mut self, pre: AHBPrescaler) -> Self {
-        self.ahb_pre = pre;
-        self
-    }
-
-    #[inline]
-    pub fn apb1_pre(mut self, pre: APBPrescaler) -> Self {
-        self.apb1_pre = pre;
-        self
-    }
-
-    #[inline]
-    pub fn apb2_pre(mut self, pre: APBPrescaler) -> Self {
-        self.apb2_pre = pre;
-        self
-    }
-
-    #[inline]
-    pub fn pll_config(mut self, pll_config: PllConfig) -> Self {
-        self.pll_config = pll_config;
-        self
-    }
-
-    #[inline]
-    pub fn stop_wakeup_clk(mut self, stop_wakeup_clk: StopWakeupClock) -> Self {
-        self.stop_wakeup_clk = stop_wakeup_clk;
-        self
-    }
-
-    #[inline]
-    pub fn with_lse(mut self, with_lse: bool) -> Self {
-        self.with_lse = with_lse;
-        self
-    }
-
-    #[inline]
-    pub fn rtc_src(mut self, src: RtcClkSrc) -> Self {
-        self.rtc_src = src;
-        self
-    }
-}
-
-/// RCC peripheral
-pub struct Rcc<'d> {
-    _rb: peripherals::RCC,
-    phantom: PhantomData<&'d mut peripherals::RCC>,
-}
-
-impl<'d> Rcc<'d> {
-    pub fn new(rcc: impl Unborrow<Target = peripherals::RCC> + 'd) -> Self {
-        unborrow!(rcc);
-        Self {
-            _rb: rcc,
-            phantom: PhantomData,
-        }
-    }
-
-    // Safety: RCC init must have been called
-    pub fn clocks(&self) -> &'static Clocks {
-        unsafe { get_freqs() }
-    }
-}
-
-/// Extension trait that freezes the `RCC` peripheral with provided clocks configuration
-pub trait RccExt {
-    fn freeze(self, config: Config) -> Clocks;
-}
-
-impl RccExt for RCC {
-    #[inline]
-    fn freeze(self, cfgr: Config) -> Clocks {
-        let rcc = pac::RCC;
-
-        let mut pll_clk = None;
-        let mut pllp_clk = None;
-        let mut pllq_clk = None;
-
-        // Enable backup domain access to access LSE/RTC registers
-        unsafe {
-            // ST: Write twice the value to flush the APB-AHB bridge to ensure the bit is written
-            PWR.cr1().modify(|r| r.set_dbp(true));
-            PWR.cr1().modify(|r| r.set_dbp(true));
-        }
-
-        let lse_freq = if cfgr.with_lse {
-            unsafe {
-                rcc.bdcr().modify(|r| r.set_lseon(true));
-
-                while !rcc.bdcr().read().lserdy() {}
-            }
-
-            Some(32_768.hz())
-        } else {
-            None
-        };
-
-        let bit = match cfgr.stop_wakeup_clk {
-            StopWakeupClock::MSI => false,
-            StopWakeupClock::HSI16 => true,
-        };
-
-        // set wakeup clock
-        unsafe { rcc.cfgr().modify(|r| r.set_stopwuck(bit)) }
-
-        let (sys_clk, sw_bits) = match cfgr.mux {
-            ClockSrc::HSI16 => {
-                // Enable HSI16
-                unsafe {
-                    rcc.cr().write(|w| w.set_hsion(true));
-                    while !rcc.cr().read().hsirdy() {}
-                }
-
-                (HSI_FREQ, 0x01)
-            }
-            ClockSrc::HSE(div) => {
-                let (divided, f_input) = match div {
-                    HseDivider::NotDivided => (false, HSE_FREQ),
-                    HseDivider::Div2 => (true, HSE_FREQ / 2),
-                };
-
-                // Configure HSE divider and enable it
-                unsafe {
-                    rcc.cr().modify(|r| {
-                        r.set_hsepre(divided);
-                        r.set_hseon(true);
-                    });
-
-                    // Wait for HSE startup
-                    while !rcc.cr().read().hserdy() {}
-                }
-
-                (f_input, 0x02)
-            }
-            ClockSrc::Pll(src) => {
-                // Configure PLL
-                //self.configure_and_wait_for_pll(&cfgr.pll_config, &src);
-                let config = &cfgr.pll_config;
-
-                // determine input frequency for PLL
-                // Select PLL and PLLSAI1 clock source [RM0434, p. 233]
-                let (f_input, src_bits) = match src {
-                    PllSrc::Msi(_range) => {
-                        todo!();
-
-                        /*
-                        let f_input = 0;
-                        (f_input, 0b01)
-                        */
-                    }
-                    PllSrc::Hsi => (HSI_FREQ, 0b10),
-                    PllSrc::Hse(div) => {
-                        let (divided, f_input) = match div {
-                            HseDivider::NotDivided => (false, HSE_FREQ),
-                            HseDivider::Div2 => (true, HSE_FREQ / 2),
-                        };
-
-                        // Configure HSE divider and enable it
-                        unsafe {
-                            rcc.cr().modify(|r| {
-                                r.set_hsepre(divided);
-                                r.set_hseon(true);
-                                r.set_csson(true);
-                            });
-
-                            // Wait for HSE startup
-                            while !rcc.cr().read().hserdy() {}
-                        }
-
-                        (f_input, 0b11)
-                    }
-                };
-
-                let pllp = config.p.map(|p| {
-                    assert!(p > 1);
-                    assert!(p <= 32);
-                    (p - 1) & 0b11111
-                });
-
-                let pllq = config.q.map(|q| {
-                    assert!(q > 1);
-                    assert!(q <= 8);
-                    (q - 1) & 0b111
-                });
-
-                // Set R value
-                assert!(config.r > 1);
-                assert!(config.r <= 8);
-                let pllr = (config.r - 1) & 0b111;
-
-                // Set N value
-                assert!(config.n > 7);
-                assert!(config.n <= 86);
-                let plln = config.n & 0b1111111;
-
-                // Set M value
-                assert!(config.m > 0);
-                assert!(config.m <= 8);
-                let pllm = (config.m - 1) & 0b111;
-
-                let vco = f_input / config.m as u32 * config.n as u32;
-                let f_pllr = vco / config.r as u32;
-
-                assert!(f_pllr <= 64_000_000);
-
-                pll_clk = Some(f_pllr.hz());
-
-                if let Some(pllp) = pllp {
-                    let f_pllp = vco / (pllp + 1) as u32;
-                    assert!(f_pllp <= 64_000_000);
-
-                    pllp_clk = Some(f_pllp.hz());
-                }
-
-                if let Some(pllq) = pllq {
-                    let f_pllq = vco / (pllq + 1) as u32;
-                    assert!(f_pllq <= 64_000_000);
-
-                    pllq_clk = Some(f_pllq.hz());
-                }
-
-                unsafe {
-                    // Set PLL coefficients
-                    rcc.pllcfgr().modify(|r| {
-                        r.set_pllsrc(src_bits);
-                        r.set_pllm(pllm);
-                        r.set_plln(plln);
-                        r.set_pllr(pllr);
-                        r.set_pllren(true);
-                        r.set_pllp(pllp.unwrap_or(1));
-                        r.set_pllpen(pllp.is_some());
-                        r.set_pllq(pllq.unwrap_or(1));
-                        r.set_pllqen(pllq.is_some());
-                    });
-
-                    // Enable PLL and wait for setup
-                    rcc.cr().modify(|r| r.set_pllon(true));
-                    while !rcc.cr().read().pllrdy() {}
-                }
-
-                (f_pllr, 0b11)
-                //(HSE_FREQ, 0x02)
-            }
-            ClockSrc::Msi => todo!(),
-        };
-
-        // Configure FLASH wait states
-        unsafe {
-            FLASH.acr().write(|w| {
-                w.set_latency(if sys_clk <= 18_000_000 {
-                    0
-                } else if sys_clk <= 36_000_000 {
-                    1
-                } else if sys_clk <= 54_000_000 {
-                    2
-                } else {
-                    3
-                })
-            });
-        }
-
-        defmt::info!("Enabled PLL (sysclk={})!", sys_clk);
-
-        unsafe {
-            rcc.cfgr().modify(|w| {
-                w.set_sw(sw_bits.into());
-            });
-
-            while rcc.cfgr().read().sw() != sw_bits {}
-        }
-
-        unsafe {
-            rcc.cfgr().modify(|w| {
-                w.set_hpre(cfgr.ahb_pre.into());
-                w.set_ppre1(cfgr.apb1_pre.into());
-                w.set_ppre2(cfgr.apb2_pre.into());
-            });
-        }
-
-        let ahb_freq: u32 = match cfgr.ahb_pre {
-            AHBPrescaler::NotDivided => sys_clk,
-            pre => {
-                let pre: u8 = pre.into();
-                let pre = 1 << (pre as u32 - 7);
-                sys_clk / pre
-            }
-        };
-
-        let (apb1_freq, apb1_tim_freq) = match cfgr.apb1_pre {
-            APBPrescaler::NotDivided => (ahb_freq, ahb_freq),
-            pre => {
-                let pre: u8 = pre.into();
-                let pre: u8 = 1 << (pre - 3);
-                let freq = ahb_freq / pre as u32;
-                (freq, freq * 2)
-            }
-        };
-
-        let (apb2_freq, apb2_tim_freq) = match cfgr.apb2_pre {
-            APBPrescaler::NotDivided => (ahb_freq, ahb_freq),
-            pre => {
-                let pre: u8 = pre.into();
-                let pre: u8 = 1 << (pre - 3);
-                let freq = ahb_freq / (1 << (pre as u8 - 3));
-                (freq, freq * 2)
-            }
-        };
-
-        let cpu1_freq = match cfgr.cpu1_hdiv {
-            HDivider::NotDivided => (sys_clk),
-            div => {
-                let div = div.divisor();
-                sys_clk / div
-            }
-        };
-
-        unsafe {
-            rcc.cfgr().modify(|r| r.set_hpre(cfgr.cpu1_hdiv as u8));
-            rcc.extcfgr().modify(|r| r.set_c2hpre(cfgr.cpu2_hdiv as u8));
-
-            // Wait for prescaler values to apply
-            while !rcc.cfgr().read().hpref() {}
-            while !rcc.extcfgr().read().shdhpref() {}
-        }
-
-        let cpu2_freq = match cfgr.cpu2_hdiv {
-            HDivider::NotDivided => (sys_clk),
-            div => {
-                let div = div.divisor();
-                sys_clk / div
-            }
-        };
-
-        Clocks {
-            sys: sys_clk.hz(),
-            ahb1: ahb_freq.hz(),
-            ahb2: ahb_freq.hz(),
-            ahb3: ahb_freq.hz(),
-            apb1: apb1_freq.hz(),
-            apb2: apb2_freq.hz(),
-            apb1_tim: apb1_tim_freq.hz(),
-            apb2_tim: apb2_tim_freq.hz(),
-            pll_clk,
-            pllp: pllp_clk,
-            pllq: pllq_clk,
-            cpu_1: cpu1_freq.hz(),
-            cpu_2: cpu2_freq.hz(),
-            lse: lse_freq,
-        }
-    }
-}
-
 pub unsafe fn init(config: Config) {
-    let r = <peripherals::RCC as embassy::util::Steal>::steal();
-    let clocks = r.freeze(config);
+    let mut pll_clk = None;
+    let mut pllp_clk = None;
+    let mut pllq_clk = None;
+
+    // Enable backup domain access to access LSE/RTC registers
+    unsafe {
+        // ST: Write twice the value to flush the APB-AHB bridge to ensure the bit is written
+        PWR.cr1().modify(|r| r.set_dbp(true));
+        PWR.cr1().modify(|r| r.set_dbp(true));
+    }
+
+    let lse_freq = if config.with_lse {
+        unsafe {
+            RCC.bdcr().modify(|r| r.set_lseon(true));
+
+            while !RCC.bdcr().read().lserdy() {}
+        }
+
+        Some(32_768.hz())
+    } else {
+        None
+    };
+
+    let bit = match config.stop_wakeup_clk {
+        StopWakeupClock::MSI => false,
+        StopWakeupClock::HSI16 => true,
+    };
+
+    // set wakeup clock
+    unsafe { RCC.cfgr().modify(|r| r.set_stopwuck(bit)) }
+
+    let (sys_clk, sw_bits) = match config.mux {
+        ClockSrc::HSI16 => {
+            // Enable HSI16
+            unsafe {
+                RCC.cr().write(|w| w.set_hsion(true));
+                while !RCC.cr().read().hsirdy() {}
+            }
+
+            (HSI_FREQ, 0x01)
+        }
+        ClockSrc::HSE(div) => {
+            let (divided, f_input) = match div {
+                HseDivider::NotDivided => (false, HSE_FREQ),
+                HseDivider::Div2 => (true, HSE_FREQ / 2),
+            };
+
+            // Configure HSE divider and enable it
+            unsafe {
+                RCC.cr().modify(|r| {
+                    r.set_hsepre(divided);
+                    r.set_hseon(true);
+                });
+
+                // Wait for HSE startup
+                while !RCC.cr().read().hserdy() {}
+            }
+
+            (f_input, 0x02)
+        }
+        ClockSrc::Pll(src) => {
+            // Configure PLL
+            //self.configure_and_wait_for_pll(&cfgr.pll_config, &src);
+            let config = &config.pll_config;
+
+            // determine input frequency for PLL
+            // Select PLL and PLLSAI1 clock source [RM0434, p. 233]
+            let (f_input, src_bits) = match src {
+                PllSrc::Msi(_range) => {
+                    todo!();
+
+                    /*
+                    let f_input = 0;
+                    (f_input, 0b01)
+                    */
+                }
+                PllSrc::Hsi => (HSI_FREQ, 0b10),
+                PllSrc::Hse(div) => {
+                    let (divided, f_input) = match div {
+                        HseDivider::NotDivided => (false, HSE_FREQ),
+                        HseDivider::Div2 => (true, HSE_FREQ / 2),
+                    };
+
+                    // Configure HSE divider and enable it
+                    unsafe {
+                        RCC.cr().modify(|r| {
+                            r.set_hsepre(divided);
+                            r.set_hseon(true);
+                            r.set_csson(true);
+                        });
+
+                        // Wait for HSE startup
+                        while !RCC.cr().read().hserdy() {}
+                    }
+
+                    (f_input, 0b11)
+                }
+            };
+
+            let pllp = config.p.map(|p| {
+                assert!(p > 1);
+                assert!(p <= 32);
+                (p - 1) & 0b11111
+            });
+
+            let pllq = config.q.map(|q| {
+                assert!(q > 1);
+                assert!(q <= 8);
+                (q - 1) & 0b111
+            });
+
+            // Set R value
+            assert!(config.r > 1);
+            assert!(config.r <= 8);
+            let pllr = (config.r - 1) & 0b111;
+
+            // Set N value
+            assert!(config.n > 7);
+            assert!(config.n <= 86);
+            let plln = config.n & 0b1111111;
+
+            // Set M value
+            assert!(config.m > 0);
+            assert!(config.m <= 8);
+            let pllm = (config.m - 1) & 0b111;
+
+            let vco = f_input / config.m as u32 * config.n as u32;
+            let f_pllr = vco / config.r as u32;
+
+            assert!(f_pllr <= 64_000_000);
+
+            pll_clk = Some(f_pllr.hz());
+
+            if let Some(pllp) = pllp {
+                let f_pllp = vco / (pllp + 1) as u32;
+                assert!(f_pllp <= 64_000_000);
+
+                pllp_clk = Some(f_pllp.hz());
+            }
+
+            if let Some(pllq) = pllq {
+                let f_pllq = vco / (pllq + 1) as u32;
+                assert!(f_pllq <= 64_000_000);
+
+                pllq_clk = Some(f_pllq.hz());
+            }
+
+            unsafe {
+                // Set PLL coefficients
+                RCC.pllcfgr().modify(|r| {
+                    r.set_pllsrc(src_bits);
+                    r.set_pllm(pllm);
+                    r.set_plln(plln);
+                    r.set_pllr(pllr);
+                    r.set_pllren(true);
+                    r.set_pllp(pllp.unwrap_or(1));
+                    r.set_pllpen(pllp.is_some());
+                    r.set_pllq(pllq.unwrap_or(1));
+                    r.set_pllqen(pllq.is_some());
+                });
+
+                // Enable PLL and wait for setup
+                RCC.cr().modify(|r| r.set_pllon(true));
+                while !RCC.cr().read().pllrdy() {}
+            }
+
+            (f_pllr, 0b11)
+            //(HSE_FREQ, 0x02)
+        }
+        ClockSrc::Msi => todo!(),
+    };
+
+    // Configure FLASH wait states
+    unsafe {
+        FLASH.acr().write(|w| {
+            w.set_latency(if sys_clk <= 18_000_000 {
+                0
+            } else if sys_clk <= 36_000_000 {
+                1
+            } else if sys_clk <= 54_000_000 {
+                2
+            } else {
+                3
+            })
+        });
+    }
+
+    defmt::info!("Enabled PLL (sysclk={})!", sys_clk);
+
+    unsafe {
+        RCC.cfgr().modify(|w| {
+            w.set_sw(sw_bits.into());
+        });
+
+        while RCC.cfgr().read().sw() != sw_bits {}
+    }
+
+    unsafe {
+        RCC.cfgr().modify(|w| {
+            w.set_hpre(config.ahb_pre.into());
+            w.set_ppre1(config.apb1_pre.into());
+            w.set_ppre2(config.apb2_pre.into());
+        });
+    }
+
+    let ahb_freq: u32 = match config.ahb_pre {
+        AHBPrescaler::NotDivided => sys_clk,
+        pre => {
+            let pre: u8 = pre.into();
+            let pre = 1 << (pre as u32 - 7);
+            sys_clk / pre
+        }
+    };
+
+    let (apb1_freq, apb1_tim_freq) = match config.apb1_pre {
+        APBPrescaler::NotDivided => (ahb_freq, ahb_freq),
+        pre => {
+            let pre: u8 = pre.into();
+            let pre: u8 = 1 << (pre - 3);
+            let freq = ahb_freq / pre as u32;
+            (freq, freq * 2)
+        }
+    };
+
+    let (apb2_freq, apb2_tim_freq) = match config.apb2_pre {
+        APBPrescaler::NotDivided => (ahb_freq, ahb_freq),
+        pre => {
+            let pre: u8 = pre.into();
+            let pre: u8 = 1 << (pre - 3);
+            let freq = ahb_freq / (1 << (pre as u8 - 3));
+            (freq, freq * 2)
+        }
+    };
+
+    let cpu1_freq = match config.cpu1_hdiv {
+        HDivider::NotDivided => (sys_clk),
+        div => {
+            let div = div.divisor();
+            sys_clk / div
+        }
+    };
+
+    unsafe {
+        RCC.cfgr().modify(|r| r.set_hpre(config.cpu1_hdiv as u8));
+        RCC.extcfgr()
+            .modify(|r| r.set_c2hpre(config.cpu2_hdiv as u8));
+
+        // Wait for prescaler values to apply
+        while !RCC.cfgr().read().hpref() {}
+        while !RCC.extcfgr().read().shdhpref() {}
+    }
+
+    let cpu2_freq = match config.cpu2_hdiv {
+        HDivider::NotDivided => (sys_clk),
+        div => {
+            let div = div.divisor();
+            sys_clk / div
+        }
+    };
+
+    let clocks = Clocks {
+        sys: sys_clk.hz(),
+        ahb1: ahb_freq.hz(),
+        ahb2: ahb_freq.hz(),
+        ahb3: ahb_freq.hz(),
+        apb1: apb1_freq.hz(),
+        apb2: apb2_freq.hz(),
+        apb1_tim: apb1_tim_freq.hz(),
+        apb2_tim: apb2_tim_freq.hz(),
+        pll_clk,
+        pllp: pllp_clk,
+        pllq: pllq_clk,
+        cpu_1: cpu1_freq.hz(),
+        cpu_2: cpu2_freq.hz(),
+        lse: lse_freq,
+    };
+
     set_freqs(clocks);
 }
