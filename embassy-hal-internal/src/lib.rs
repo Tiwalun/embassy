@@ -15,3 +15,9 @@ pub use peripheral::{Peri, PeripheralType};
 
 #[cfg(feature = "cortex-m")]
 pub mod interrupt;
+
+/*
+#[cfg(feature = "riscv32")]
+#[path = "interrupt_riscv.rs"]
+pub mod interrupt;
+*/

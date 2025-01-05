@@ -95,12 +95,12 @@ pub mod pac {
     #[doc(no_inline)]
     pub use nrf_pac::{
         SICR_S as SICR,
-        ICACHEDATA_S as ICACHEDATA,
-        ICACHEINFO_S as ICACHEINFO,
-        SWI00_S as SWI00,
-        SWI01_S as SWI01,
-        SWI02_S as SWI02,
-        SWI03_S as SWI03,
+        //ICACHEDATA_S as ICACHEDATA,
+        //ICACHEINFO_S as ICACHEINFO,
+        //SWI00_S as SWI00,
+        //SWI01_S as SWI01,
+        //SWI02_S as SWI02,
+        //SWI03_S as SWI03,
         SPU00_S as SPU00,
         MPC00_S as MPC00,
         DPPIC00_S as DPPIC00,
@@ -192,8 +192,8 @@ pub mod pac {
         OSCILLATORS_S as OSCILLATORS,
         REGULATORS_S as REGULATORS,
         CRACENCORE_S as CRACENCORE,
-        CPUC_S as CPUC,
-        ICACHE_S as ICACHE,
+        //CPUC_S as CPUC,
+        //ICACHE_S as ICACHE,
     };
 }
 
@@ -290,6 +290,7 @@ impl_pin!(P2_08, 2, 8);
 impl_pin!(P2_09, 2, 9);
 impl_pin!(P2_10, 2, 10);
 
+/*
 embassy_hal_internal::interrupt_mod!(
     SWI00,
     SWI01,
@@ -349,3 +350,4 @@ embassy_hal_internal::interrupt_mod!(
     GPIOTE30_1,
     CLOCK_POWER,
 );
+*/

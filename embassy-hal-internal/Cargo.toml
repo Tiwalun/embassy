@@ -6,11 +6,7 @@ license = "MIT OR Apache-2.0"
 description = "Internal implementation details for Embassy HALs. DO NOT USE DIRECTLY."
 repository = "https://github.com/embassy-rs/embassy"
 documentation = "https://docs.embassy.dev/embassy-hal-internal"
-categories = [
-    "embedded",
-    "no-std",
-    "asynchronous",
-]
+categories = ["embedded", "no-std", "asynchronous"]
 
 [features]
 
@@ -26,6 +22,7 @@ prio-bits-7 = []
 prio-bits-8 = []
 
 cortex-m = ["dep:cortex-m", "dep:critical-section"]
+riscv32 = ["dep:riscv", "dep:critical-section"]
 
 [dependencies]
 defmt = { version = "1.0.1", optional = true }
@@ -34,4 +31,7 @@ log = { version = "0.4.14", optional = true }
 num-traits = { version = "0.2.14", default-features = false }
 
 cortex-m = { version = "0.7.6", optional = true }
+riscv = { version = "0.12.1", features = [
+    "critical-section-single-hart",
+], optional = true }
 critical-section = { version = "1", optional = true }

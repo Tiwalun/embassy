@@ -24,6 +24,8 @@
     feature = "nrf5340-net",
     feature = "nrf54l15-app-s",
     feature = "nrf54l15-app-ns",
+    feature = "nrf54l15-flpr-s",
+    feature = "nrf54l15-flpr-ns",
     feature = "nrf9160-s",
     feature = "nrf9160-ns",
     feature = "nrf9120-s",
@@ -48,6 +50,8 @@ compile_error!(
     nrf5340-net,
     nrf54l15-app-s,
     nrf54l15-app-ns,
+    nrf54l15-flpr-s,
+    nrf54l15-flpr-ns,
     nrf9160-s,
     nrf9160-ns,
     nrf9120-s,
@@ -185,6 +189,7 @@ pub mod wdt;
 #[cfg_attr(feature = "_nrf5340-app", path = "chips/nrf5340_app.rs")]
 #[cfg_attr(feature = "_nrf5340-net", path = "chips/nrf5340_net.rs")]
 #[cfg_attr(feature = "_nrf54l15-app", path = "chips/nrf54l15_app.rs")]
+#[cfg_attr(feature = "_nrf54l15-flpr", path = "chips/nrf54l15_flpr.rs")]
 #[cfg_attr(feature = "_nrf9160", path = "chips/nrf9160.rs")]
 #[cfg_attr(feature = "_nrf9120", path = "chips/nrf9120.rs")]
 mod chip;
@@ -270,8 +275,10 @@ pub(crate) use chip::pac;
 pub use chip::{peripherals, Peripherals, EASY_DMA_SIZE};
 pub use embassy_hal_internal::{Peri, PeripheralType};
 
+// TODO: Better config
+#[cfg(not(feature = "_nrf54l15-flpr"))]
 pub use crate::chip::interrupt;
-#[cfg(feature = "rt")]
+#[cfg(all(feature = "rt", not(feature = "_nrf54l15-flpr")))]
 pub use crate::pac::NVIC_PRIO_BITS;
 
 pub mod config {
@@ -860,6 +867,9 @@ pub fn init(config: config::Config) -> Peripherals {
         }
     }
 
+     // TODO: Better config, this should not depend on the core type
+     //       It is not needed for the FLPR core on nRF54L15 because we don't write UICR there.
+     #[cfg(feature = "_cortex_m")]
     if needs_reset {
         cortex_m::peripheral::SCB::sys_reset();
     }
@@ -891,7 +901,7 @@ pub fn init(config: config::Config) -> Peripherals {
     match config.hfclk_source {
         config::HfclkSource::Internal => {}
         config::HfclkSource::ExternalXtal => {
-            #[cfg(feature = "_nrf54l")]
+            #[cfg(feature = "_nrf54l15-app")]
             {
                 r.events_xostarted().write_value(0);
                 r.tasks_xostart().write_value(1);
@@ -973,19 +983,22 @@ pub fn init(config: config::Config) -> Peripherals {
         config::LfclkSource::InternalRC => r.lfclksrc().write(|w| w.set_src(pac::clock::vals::Lfclksrc::LFRC)),
         config::LfclkSource::ExternalXtal => r.lfclksrc().write(|w| w.set_src(pac::clock::vals::Lfclksrc::LFXO)),
     }
-    #[cfg(feature = "_nrf54l")]
+    #[cfg(feature = "_nrf54l15-app")]
     match config.lfclk_source {
         config::LfclkSource::InternalRC => r.lfclk().src().write(|w| w.set_src(pac::clock::vals::Lfclksrc::LFRC)),
         config::LfclkSource::Synthesized => r.lfclk().src().write(|w| w.set_src(pac::clock::vals::Lfclksrc::LFSYNT)),
         config::LfclkSource::ExternalXtal => r.lfclk().src().write(|w| w.set_src(pac::clock::vals::Lfclksrc::LFXO)),
     }
 
-    // Start LFCLK.
-    // Datasheet says this could take 100us from synth source
-    // 600us from rc source, 0.25s from an external source.
-    r.events_lfclkstarted().write_value(0);
-    r.tasks_lfclkstart().write_value(1);
-    while r.events_lfclkstarted().read() == 0 {}
+    #[cfg(feature = "_nrf54l15-app")]
+    {
+        // Start LFCLK.
+        // Datasheet says this could take 100us from synth source
+        // 600us from rc source, 0.25s from an external source.
+        r.events_lfclkstarted().write_value(0);
+        r.tasks_lfclkstart().write_value(1);
+        while r.events_lfclkstarted().read() == 0 {}
+    }
 
     #[cfg(not(any(feature = "_nrf5340", feature = "_nrf91", feature = "_nrf54l")))]
     {
