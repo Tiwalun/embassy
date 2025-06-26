@@ -202,8 +202,7 @@ embedded-io-async = { version = "0.6.1" }
 rand-core-06 = { package = "rand_core", version = "0.6" }
 rand-core-09 = { package = "rand_core", version = "0.9" }
 
-#nrf-pac = "0.1.0"
-nrf-pac = { path = "../../nrf-pac" }
+nrf-pac = "0.1.0"
 
 defmt = { version = "1.0.1", optional = true }
 
@@ -217,3 +216,6 @@ embedded-storage = "0.3.1"
 embedded-storage-async = "0.4.1"
 cfg-if = "1.0.0"
 document-features = "0.2.7"
+
+[patch.crates-io]
+nrf-pac = { git = "https://github.com/tiwalun/nrf-pac", rev = "5033a9edffa3b1ed3420f1ebcb55ef8b03b5ce85" }

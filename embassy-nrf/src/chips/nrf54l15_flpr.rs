@@ -87,8 +87,8 @@ pub mod pac {
         RESET_NS as RESET,
         OSCILLATORS_NS as OSCILLATORS,
         REGULATORS_NS as REGULATORS,
-        TPIU_NS as TPIU,
-        ETM_NS as ETM,
+        //TPIU_NS as TPIU,
+        //ETM_NS as ETM,
     };
 
     #[cfg(feature = "_s")]
